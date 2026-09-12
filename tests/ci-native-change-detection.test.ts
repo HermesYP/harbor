@@ -5,10 +5,17 @@ import { readFileSync } from "node:fs";
 // @ts-expect-error Node test types are intentionally outside the browser-only tsconfig.
 import test from "node:test";
 
-const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+const frontendWorkflow = readFileSync(
+  new URL("../.github/workflows/frontend-quality.yml", import.meta.url),
+  "utf8",
+);
+const nativeWorkflow = readFileSync(
+  new URL("../.github/workflows/native-quality.yml", import.meta.url),
+  "utf8",
+);
 
 function nativeChangePathspecs(): string[] {
-  const detectionStep = workflow.match(
+  const detectionStep = nativeWorkflow.match(
     /- name: Detect native changes[\s\S]*?(?=\n\s+- name: Skip native check)/,
   )?.[0];
 
@@ -30,7 +37,7 @@ test("native CI watches every file in both Rust projects", () => {
 });
 
 test("pull request checks diff from the synthetic merge base parent", () => {
-  const pullRequestBaseSelections = workflow.matchAll(
+  const pullRequestBaseSelections = `${frontendWorkflow}\n${nativeWorkflow}`.matchAll(
     /if \[\[ "\$GITHUB_EVENT_NAME" == "pull_request" \]\]; then\s+BASE_SHA="\$\{GITHUB_SHA\}\^1"/g,
   );
 
