@@ -175,6 +175,8 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
     src,
     snap,
     stremioServerTranscode: settings.stremioServerTranscode,
+    stallWaitSec: settings.stallWaitSec,
+    autoNextStreamOnStall: settings.autoNextStreamOnStall,
     instantPlay: settings.instantPlay,
     inRoom: roomSnapshot.state === "joined",
     debrids,

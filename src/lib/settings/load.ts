@@ -5,6 +5,7 @@ import {
   type CustomColors,
   type ThemeSettings,
 } from "@/lib/theme";
+import { stallWaitSec } from "@/lib/player/stall-wait";
 import { languageName } from "@/lib/subtitles/language";
 import { sanitizeSeekStep } from "@/lib/seek-step";
 import { migrateModelId } from "@/lib/ai-models";
@@ -163,6 +164,11 @@ export function loadStoredSettings(rawKey: string = STORAGE_KEY): Settings {
       ...DEFAULT,
       ...parsed,
       ...posterCards,
+      autoNextStreamOnStall:
+        typeof parsed.autoNextStreamOnStall === "boolean"
+          ? parsed.autoNextStreamOnStall
+          : DEFAULT.autoNextStreamOnStall,
+      stallWaitSec: stallWaitSec(parsed.stallWaitSec),
       posterDockTransitionMs: sanitizePosterDockTransition(parsed.posterDockTransitionMs),
       uiLanguage: resolveUiLanguage(parsed.uiLanguage),
       streaming: { ...DEFAULT.streaming, ...(parsed.streaming ?? {}) },

@@ -1,3 +1,4 @@
+import { DEFAULT_STALL_WAIT_SEC } from "@/lib/player/stall-wait";
 import { DEFAULT_THEME } from "@/lib/theme";
 import type { Settings } from "./types";
 
@@ -158,6 +159,8 @@ export const DEFAULT: Settings = {
   playerMenuBlack: false,
   seekPreviewEnabled: typeof navigator !== "undefined" && (navigator.hardwareConcurrency || 8) >= 4,
   instantPlay: true,
+  autoNextStreamOnStall: true,
+  stallWaitSec: DEFAULT_STALL_WAIT_SEC,
   seasonSourceLock: false,
   rememberLastStream: true,
   keepSourceNextEpisode: false,

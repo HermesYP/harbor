@@ -1,3 +1,5 @@
+import { STALL_WAIT_OPTIONS, stallWaitSec } from "@/lib/player/stall-wait";
+import { ToggleRow } from "../shared";
 import { useSettings } from "@/lib/settings";
 import { useT } from "@/lib/i18n";
 
@@ -37,6 +39,27 @@ export function PlayModePanel() {
 
   return (
     <div className="flex flex-col gap-2.5">
+      <ToggleRow
+        label={t("Auto-skip stalled streams")}
+        sub={t("Try another source when playback fails to start. Turn off to wait without automatically skipping.")}
+        value={settings.autoNextStreamOnStall}
+        onChange={(value) => update({ autoNextStreamOnStall: value })}
+      />
+      <label htmlFor="set-stall-wait" className="flex items-center justify-between gap-4 rounded-2xl border border-edge-soft px-5 py-4 text-[14px] text-ink">
+        {t("Stalled stream timeout")}
+        <select
+          id="set-stall-wait"
+          value={settings.stallWaitSec}
+          onChange={(event) => update({ stallWaitSec: stallWaitSec(Number(event.target.value)) })}
+          className="rounded-lg border border-edge bg-canvas px-3 py-2 text-ink"
+        >
+          {STALL_WAIT_OPTIONS.map((seconds) => (
+            <option key={seconds} value={seconds}>
+              {t("{seconds} seconds", { seconds })}
+            </option>
+          ))}
+        </select>
+      </label>
       {choices.map((c) => {
         const selected = mode === c.id;
         return (

@@ -196,6 +196,8 @@ export type Settings = {
   playerMenuBlack: boolean;
   seekPreviewEnabled: boolean;
   instantPlay: boolean;
+  autoNextStreamOnStall: boolean;
+  stallWaitSec: number;
   seasonSourceLock: boolean;
   rememberLastStream: boolean;
   keepSourceNextEpisode: boolean;
