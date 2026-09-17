@@ -28,12 +28,16 @@ export function PlayModePanel() {
     {
       id: "manual",
       label: t("Manual picker"),
-      sub: t("Hitting Play opens the source list so you can choose quality, debrid, and audio yourself."),
+      sub: t(
+        "Hitting Play opens the source list so you can choose quality, debrid, and audio yourself.",
+      ),
     },
     {
       id: "season",
       label: t("Lock to season server"),
-      sub: t("Pick a source once and Harbor keeps playing the rest of that season from the same release, no re-picking. Works best with a debrid season pack. Skipped for anime."),
+      sub: t(
+        "Pick a source once and Harbor keeps playing the rest of that season from the same release, no re-picking. Works best with a debrid season pack. Skipped for anime.",
+      ),
     },
   ];
 
@@ -41,11 +45,16 @@ export function PlayModePanel() {
     <div className="flex flex-col gap-2.5">
       <ToggleRow
         label={t("Auto-skip stalled streams")}
-        sub={t("Try another source when playback fails to start. Turn off to wait without automatically skipping.")}
+        sub={t(
+          "Recover automatically when startup stalls, using your play mode. Turn off to keep waiting. Playback errors can still trigger recovery.",
+        )}
         value={settings.autoNextStreamOnStall}
         onChange={(value) => update({ autoNextStreamOnStall: value })}
       />
-      <label htmlFor="set-stall-wait" className="flex items-center justify-between gap-4 rounded-2xl border border-edge-soft px-5 py-4 text-[14px] text-ink">
+      <label
+        htmlFor="set-stall-wait"
+        className="flex items-center justify-between gap-4 rounded-2xl border border-edge-soft px-5 py-4 text-[14px] text-ink"
+      >
         {t("Stalled stream timeout")}
         <select
           id="set-stall-wait"
@@ -55,11 +64,16 @@ export function PlayModePanel() {
         >
           {STALL_WAIT_OPTIONS.map((seconds) => (
             <option key={seconds} value={seconds}>
-              {t("{seconds} seconds", { seconds })}
+              {seconds === 18
+                ? t("Default (18s load; adaptive grace periods)")
+                : t("{seconds} seconds", { seconds })}
             </option>
           ))}
         </select>
       </label>
+      <p className="px-5 text-[12.5px] text-ink-muted">
+        {t("Custom timeouts are minimum waits. Peer-to-peer startup may take longer.")}
+      </p>
       {choices.map((c) => {
         const selected = mode === c.id;
         return (
@@ -110,7 +124,9 @@ export function PlayModePanel() {
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-[15px] font-semibold text-ink">{t("Remember last stream")}</span>
           <span className="text-[12.5px] leading-snug text-ink-muted">
-            {t("When you resume something you were watching, replay the exact stream you last used (same addon and source) instead of opening the picker again. Turn off to always choose fresh.")}
+            {t(
+              "When you resume something you were watching, replay the exact stream you last used (same addon and source) instead of opening the picker again. Turn off to always choose fresh.",
+            )}
           </span>
         </div>
       </button>
@@ -127,9 +143,13 @@ export function PlayModePanel() {
           <span className="h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.4)]" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-[15px] font-semibold text-ink">{t("Ask to resume or start over")}</span>
+          <span className="text-[15px] font-semibold text-ink">
+            {t("Ask to resume or start over")}
+          </span>
           <span className="text-[12.5px] leading-snug text-ink-muted">
-            {t("When you hit Play on something you've partly watched, show a prompt to resume from where you left off or start over. Also covers items synced from Stremio or Trakt.")}
+            {t(
+              "When you hit Play on something you've partly watched, show a prompt to resume from where you left off or start over. Also covers items synced from Stremio or Trakt.",
+            )}
           </span>
         </div>
       </button>
@@ -146,9 +166,13 @@ export function PlayModePanel() {
           <span className="h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.4)]" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-[15px] font-semibold text-ink">{t("Resume where you left off")}</span>
+          <span className="text-[15px] font-semibold text-ink">
+            {t("Resume where you left off")}
+          </span>
           <span className="text-[12.5px] leading-snug text-ink-muted">
-            {t("Pick up partly-watched episodes and movies at your saved spot. Anything watched past 80% always restarts. Turn this off to always start from the beginning, handy if you rewatch shows.")}
+            {t(
+              "Pick up partly-watched episodes and movies at your saved spot. Anything watched past 80% always restarts. Turn this off to always start from the beginning, handy if you rewatch shows.",
+            )}
           </span>
         </div>
       </button>
@@ -165,9 +189,13 @@ export function PlayModePanel() {
           <span className="h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.4)]" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-[15px] font-semibold text-ink">{t("Keep same source on next episode")}</span>
+          <span className="text-[15px] font-semibold text-ink">
+            {t("Keep same source on next episode")}
+          </span>
           <span className="text-[12.5px] leading-snug text-ink-muted">
-            {t("When auto-playing the next episode, keep the same release/source you were just watching instead of Harbor's top-ranked stream. Falls back to the best stream if that source isn't available.")}
+            {t(
+              "When auto-playing the next episode, keep the same release/source you were just watching instead of Harbor's top-ranked stream. Falls back to the best stream if that source isn't available.",
+            )}
           </span>
         </div>
       </button>
@@ -184,9 +212,13 @@ export function PlayModePanel() {
           <span className="h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.4)]" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-[15px] font-semibold text-ink">{t("Stay in fullscreen after closing the player")}</span>
+          <span className="text-[15px] font-semibold text-ink">
+            {t("Stay in fullscreen after closing the player")}
+          </span>
           <span className="text-[12.5px] leading-snug text-ink-muted">
-            {t("When you exit playback, keep the window fullscreen instead of dropping back to a window. Turn off to leave fullscreen automatically whenever the player closes.")}
+            {t(
+              "When you exit playback, keep the window fullscreen instead of dropping back to a window. Turn off to leave fullscreen automatically whenever the player closes.",
+            )}
           </span>
         </div>
       </button>
@@ -203,9 +235,13 @@ export function PlayModePanel() {
           <span className="h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.4)]" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-[15px] font-semibold text-ink">{t("Restore window position after fullscreen")}</span>
+          <span className="text-[15px] font-semibold text-ink">
+            {t("Restore window position after fullscreen")}
+          </span>
           <span className="text-[12.5px] leading-snug text-ink-muted">
-            {t("When you exit fullscreen, return the window to exactly where it was. Turn off to center it on screen instead.")}
+            {t(
+              "When you exit fullscreen, return the window to exactly where it was. Turn off to center it on screen instead.",
+            )}
           </span>
         </div>
       </button>
@@ -222,9 +258,13 @@ export function PlayModePanel() {
           <span className="h-5 w-5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.4)]" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-[15px] font-semibold text-ink">{t("Volume pop-up while watching")}</span>
+          <span className="text-[15px] font-semibold text-ink">
+            {t("Volume pop-up while watching")}
+          </span>
           <span className="text-[12.5px] leading-snug text-ink-muted">
-            {t("Show a quick volume overlay when you change volume with the player controls hidden, so keyboard and scroll wheel changes are always visible.")}
+            {t(
+              "Show a quick volume overlay when you change volume with the player controls hidden, so keyboard and scroll wheel changes are always visible.",
+            )}
           </span>
         </div>
       </button>

@@ -4644,7 +4644,9 @@
   "Zoom out": "Zoom out",
   "العربية": "العربية",
   "Auto-skip stalled streams": "Auto-skip stalled streams",
-  "Try another source when playback fails to start. Turn off to wait without automatically skipping.": "Try another source when playback fails to start. Turn off to wait without automatically skipping.",
+  "Recover automatically when startup stalls, using your play mode. Turn off to keep waiting. Playback errors can still trigger recovery.": "Recover automatically when startup stalls, using your play mode. Turn off to keep waiting. Playback errors can still trigger recovery.",
   "Stalled stream timeout": "Stalled stream timeout",
-  "{seconds} seconds": "{seconds} seconds"
+  "{seconds} seconds": "{seconds} seconds",
+  "Default (18s load; adaptive grace periods)": "Default (18s load; adaptive grace periods)",
+  "Custom timeouts are minimum waits. Peer-to-peer startup may take longer.": "Custom timeouts are minimum waits. Peer-to-peer startup may take longer."
 }

@@ -68,7 +68,7 @@ function retryHarness(t, overrides = {}) {
     },
   };
   const picks = [];
-  const bridgeRef = { current: { destroy() {} } };
+  const bridgeRef = { current: { destroy() {}, load() {} } };
   const params = {
     bridgeRef,
     src: { url: "https://example.test/stream", meta: { id: "tt1" } },
@@ -209,6 +209,9 @@ test("settings UI changes the persisted timeout without enabling a disabled skip
   const select = elements.find((el) => el.type === "select" && el.props.id === "set-stall-wait");
   assert.ok(select, "timeout selector must be rendered in Play mode settings");
   assert.equal(select.props.value, 30);
+  const toggle = elements.find((el) => el.props?.label === "Auto-skip stalled streams");
+  assert.match(toggle.props.sub, /Playback errors can still trigger recovery/);
+  assert.match(select.props.children[0].props.children, /Default/);
   select.props.onChange({ target: { value: "60" } });
   assert.equal(h.load().stallWaitSec, 60);
   assert.equal(h.load().autoNextStreamOnStall, false);
@@ -307,6 +310,112 @@ test("disabled stall skipping never advances an unstarted stream", (t) => {
   const h = retryHarness(t, { autoNextStreamOnStall: false });
   t.mock.timers.tick(120000);
   assert.equal(h.picks.length, 0);
+  h.unmount();
+});
+
+test("disabled stall skipping preserves explicit playback-error recovery", (t) => {
+  const h = retryHarness(t, {
+    autoNextStreamOnStall: false,
+    src: { url: "http://127.0.0.1/stream", meta: { id: "tt1" } },
+  });
+  h.render({ snap: { ...h.params.snap, errorCode: "network" } });
+  assert.equal(h.picks.length, 0, "first error reloads the same URL");
+  h.render({ snap: { ...h.params.snap, errorCode: null } });
+  h.render({ snap: { ...h.params.snap, errorCode: "network" } });
+  assert.equal(h.picks.length, 1);
+  h.unmount();
+});
+
+for (const action of ["disable", "unmount", "paused", "ended", "video"]) {
+  test(`black-screen timeout cancels on ${action}`, (t) => {
+    const h = retryHarness(t, {
+      snap: {
+        status: "playing",
+        durationSec: 3600,
+        errorCode: null,
+        videoWidth: 0,
+        videoHeight: 0,
+      },
+    });
+    h.setPosition(10);
+    t.mock.timers.tick(10000);
+    if (action === "disable") h.render({ autoNextStreamOnStall: false });
+    if (action === "unmount") h.unmount();
+    if (action === "paused" || action === "ended")
+      h.render({ snap: { ...h.params.snap, status: action } });
+    if (action === "video")
+      h.render({ snap: { ...h.params.snap, videoWidth: 1920, videoHeight: 1080 } });
+    t.mock.timers.tick(120000);
+    assert.equal(h.picks.length, 0);
+    h.unmount();
+  });
+}
+
+for (const inRoom of [false, true]) {
+  test(`disabled P2P watchdogs do not skip (room=${inRoom})`, (t) => {
+    const h = retryHarness(t, {
+      isP2pEngine: true,
+      engineFailure: true,
+      autoNextStreamOnStall: false,
+      inRoom,
+    });
+    for (let i = 0; i < 130; i++) t.mock.timers.tick(1000);
+    assert.equal(h.picks.length, 0);
+    h.unmount();
+  });
+}
+
+for (const seconds of [18, 30, 60]) {
+  test(`P2P failure respects first-frame grace and ${seconds}s minimum`, (t) => {
+    const h = retryHarness(t, {
+      isP2pEngine: true,
+      engineFailure: true,
+      stallWaitSec: seconds,
+      snap: {
+        status: "loading",
+        durationSec: 3600,
+        errorCode: null,
+        videoWidth: 0,
+        videoHeight: 0,
+      },
+    });
+    const deadline = Math.max(seconds, 20);
+    for (let i = 0; i < deadline - 1; i++) t.mock.timers.tick(1000);
+    assert.equal(h.picks.length, 0);
+    t.mock.timers.tick(1000);
+    assert.equal(h.picks.length, 1);
+    h.unmount();
+  });
+}
+
+test("healthy P2P transfers are not skipped at the hard ceiling", (t) => {
+  const h = retryHarness(t, {
+    isP2pEngine: true,
+    engineStats: { downloadSpeed: 1, unchoked: 1, downloaded: 100000 },
+  });
+  for (let i = 0; i < 130; i++) t.mock.timers.tick(1000);
+  assert.equal(h.picks.length, 0);
+  h.unmount();
+});
+
+test("idle P2P retains the 75-second hard ceiling", (t) => {
+  const h = retryHarness(t, { isP2pEngine: true });
+  for (let i = 0; i < 75; i++) t.mock.timers.tick(1000);
+  assert.equal(h.picks.length, 0);
+  t.mock.timers.tick(1000);
+  assert.equal(h.picks.length, 1);
+  h.unmount();
+});
+
+test("black-screen recovery runs at the selected deadline without snapshot changes", (t) => {
+  const h = retryHarness(t, {
+    snap: { status: "playing", durationSec: 3600, errorCode: null, videoWidth: 0, videoHeight: 0 },
+  });
+  h.setPosition(10);
+  t.mock.timers.tick(29999);
+  assert.equal(h.picks.length, 0);
+  t.mock.timers.tick(1);
+  assert.equal(h.picks.length, 1);
   h.unmount();
 });
 
