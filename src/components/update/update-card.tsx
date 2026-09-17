@@ -51,15 +51,14 @@ export function UpdateCard() {
                       ? "Update failed"
                       : "Update available"}
             </span>
-            {u.version && (
-              <span className="text-[12.5px] text-ink-subtle">Harbor {u.version}</span>
-            )}
+            {u.version && <span className="text-[12.5px] text-ink-subtle">Harbor {u.version}</span>}
           </div>
-          {u.status !== "installing" && u.status !== "downloading" && (
+          {u.status !== "installing" && (
             <button
               onClick={closeUpdatePanel}
-              aria-label="Close"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors hover:bg-raised hover:text-ink"
+              aria-label={u.status === "downloading" ? "Minimize update download" : "Close"}
+              title={u.status === "downloading" ? "Keep downloading in the background" : undefined}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-subtle transition-colors hover:bg-raised hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
             >
               <X size={16} strokeWidth={2.2} />
             </button>
@@ -131,7 +130,8 @@ export function UpdateCard() {
           )}
           {u.status === "downloading" && (
             <span className="flex items-center gap-1.5 text-[12px] text-ink-subtle">
-              <Check size={14} strokeWidth={2.4} className="text-accent" /> Keep using Harbor while it downloads
+              <Check size={14} strokeWidth={2.4} className="text-accent" /> Keep using Harbor while
+              it downloads
             </span>
           )}
         </div>
