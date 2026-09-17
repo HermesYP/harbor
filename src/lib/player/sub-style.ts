@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Settings } from "@/lib/settings";
+import { prepareMpvCustomFont } from "./mpv-custom-font.ts";
 
 function clamp(n: number, lo: number, hi: number): number {
   if (!Number.isFinite(n)) return lo;
@@ -35,10 +36,41 @@ export type SubRenderContext = {
   imageNativeActive: boolean;
 };
 
+let styleRequest = 0;
+// mpv reports its current directory, which may already be one we installed.
+const originalFontDirectories = new Map<string, string>();
+
 export async function applySubStyle(
   s: Settings,
   context: SubRenderContext = { assNativeActive: false, imageNativeActive: false },
 ): Promise<void> {
+  const request = ++styleRequest;
+  const currentFontsDir = await invoke<string>("mpv_get_property", { name: "sub-fonts-dir" }).catch(
+    () => "",
+  );
+  if (request !== styleRequest) return;
+  const bundledFontsDir = originalFontDirectories.get(currentFontsDir) ?? currentFontsDir;
+  let family = mpvFontFor(s.subFontFamily);
+  if (s.subFontFamily.startsWith("custom:")) {
+    try {
+      const custom = await prepareMpvCustomFont(s);
+      if (request !== styleRequest) return;
+      if (custom) {
+        if (bundledFontsDir && bundledFontsDir !== custom.directory) {
+          originalFontDirectories.set(custom.directory, bundledFontsDir);
+        }
+        await invoke("mpv_set_property", { name: "sub-fonts-dir", value: custom.directory });
+        family = custom.family;
+      }
+    } catch (error) {
+      console.warn("[fonts] failed to prepare native subtitle font", error);
+    }
+  } else {
+    await invoke("mpv_set_property", { name: "sub-fonts-dir", value: bundledFontsDir ?? "" }).catch(
+      () => {},
+    );
+  }
+  if (request !== styleRequest) return;
   const override = s.subAssOverride;
   const assMargins = context.assNativeActive && override !== "no" ? "yes" : "no";
   const marginY = clamp(Number(s.subMarginY) || 0, 0, 100);
@@ -49,7 +81,7 @@ export async function applySubStyle(
   const reposition = !context.assNativeActive || override !== "no";
   const props: Array<[string, unknown]> = [
     ["sub-font-size", 32],
-    ["sub-font", mpvFontFor(s.subFontFamily)],
+    ["sub-font", family],
     ["sub-scale", Math.min(4, Math.max(0.4, (Number(s.subFontSize) || 32) / 32))],
     ["sub-color", mpvColor(s.subFontColor, opacity)],
     ["sub-border-color", mpvColor(s.subBorderColor, opacity)],
@@ -67,8 +99,6 @@ export async function applySubStyle(
     ["sub-pos", reposition ? clamp(100 - marginY, 0, 100) : 100],
   ];
   await Promise.all(
-    props.map(([name, value]) =>
-      invoke("mpv_set_property", { name, value }).catch(() => {}),
-    ),
+    props.map(([name, value]) => invoke("mpv_set_property", { name, value }).catch(() => {})),
   );
 }
