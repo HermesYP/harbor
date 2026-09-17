@@ -13,11 +13,7 @@ const ANIME_ID = /^(kitsu|mal|anilist|anidb):/;
 
 export type AnimeMode = "all" | "exclude" | "only";
 
-export function isNextAired(isAnime: boolean, airDate: string | undefined): boolean {
-  const t = airDate ? Date.parse(airDate) : NaN;
-  if (isAnime) return Number.isFinite(t) && t <= Date.now();
-  return !airDate || !Number.isFinite(t) || t <= Date.now();
-}
+export { isNextAired } from "./episode-advance";
 
 function resurfaceAired(airDate: string | undefined): boolean {
   const t = airDate ? Date.parse(airDate) : NaN;

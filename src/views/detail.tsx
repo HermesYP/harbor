@@ -31,7 +31,12 @@ import { fetchAddonMeta } from "@/lib/addons";
 import { resolveMeta } from "@/lib/meta-resource";
 import { useMdblistScores } from "@/lib/providers/mdblist";
 import { lastPlayedEpisode, readResumeEntry, saveResumeMs } from "@/lib/resume";
-import { localCwEntry } from "@/lib/local-cw";
+import { localCwEntry, localCwVersion, subscribeLocalCw } from "@/lib/local-cw";
+import { getEpisodeProgress } from "@/lib/episode-progress";
+import { isFinishedSeries, isPlaybackFinished, resolveSeriesResume } from "@/lib/episode-advance";
+import { fetchEpisodeList } from "@/lib/series-episodes";
+import { useSimkl } from "@/lib/simkl/provider";
+import { useWatchedSets } from "./detail/series-episodes/use-watched-sets";
 import { omdbPrefetch, omdbScores, type OmdbScores } from "@/lib/providers/omdb";
 import { harborImdbTitle } from "@/lib/providers/harbor-imdb";
 import { awardSummary, useAwards } from "@/lib/providers/wikidata";
@@ -953,7 +958,36 @@ export function DetailView({
   const upcoming = !loading && isTitleUpcoming(detail, meta);
   const currentFranchiseId = animeCanonicalId ?? meta.id;
 
-  const lastPlay = useMemo(() => {
+  useSyncExternalStore(subscribeLocalCw, localCwVersion);
+  const { isConnected: simklConnected } = useSimkl();
+  const resumeImdb = detail?.imdbId ?? (meta.id.startsWith("tt") ? meta.id : null);
+  const { traktWatched, simklWatched } = useWatchedSets({
+    traktConnected: isSeries && !isAnime && traktConnected,
+    simklConnected: isSeries && !isAnime && simklConnected,
+    imdbId: resumeImdb,
+    metaId: meta.id,
+  });
+  const [resumeEpisodes, setResumeEpisodes] = useState<{
+    id: string;
+    episodes: PlayEpisode[];
+  } | null>(null);
+  useEffect(() => {
+    if (!isSeries || isAnime) return;
+    let cancelled = false;
+    void fetchEpisodeList(
+      { id: meta.id, type: meta.type, name: meta.name },
+      { tmdbKey: settings.tmdbKey },
+    )
+      .then((episodes) => {
+        if (!cancelled) setResumeEpisodes({ id: meta.id, episodes });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isSeries, isAnime, meta.id, meta.type, meta.name, settings.tmdbKey]);
+
+  const lastPlayed = (() => {
     if (episodeHint) return episodeHint;
     if (isAnime) return lastPlayedEpisode(meta.id);
     const candidates: Array<{ season: number; episode: number; t: number }> = [];
@@ -983,7 +1017,11 @@ export function DetailView({
       }
     }
     const st = libraryItem?.state;
-    if (libraryItem?.type === "series" && st && (st.timeOffset ?? 0) > 0) {
+    if (
+      libraryItem?.type === "series" &&
+      st &&
+      ((st.timeOffset ?? 0) > 0 || isFinishedSeries(libraryItem))
+    ) {
       const se = episodeFromVideoId(st.video_id);
       const season = st.season ?? se?.season;
       const episode = st.episode ?? se?.episode;
@@ -1000,7 +1038,69 @@ export function DetailView({
     if (candidates.length === 0) return null;
     candidates.sort((a, b) => b.t - a.t);
     return { season: candidates[0].season, episode: candidates[0].episode };
-  }, [meta.id, detail?.imdbId, detail?.id, libraryItem, isAnime, episodeHint]);
+  })();
+
+  const resolveResume = useCallback(
+    (current: PlayEpisode, item = libraryItem) => {
+      const ids = [
+        ...new Set(
+          [meta.id, resumeImdb, detail?.id != null ? `tmdb:tv:${detail.id}` : null].filter(
+            (id): id is string => !!id,
+          ),
+        ),
+      ];
+      const watched = (season: number, episode: number) => {
+        if (ids.some((id) => manualWatchedState(id, season, episode) === false)) return false;
+        if (
+          ids.some(
+            (id) =>
+              getEpisodeProgress(
+                id,
+                season,
+                episode,
+                null,
+                resumeImdb,
+                traktWatched,
+                stremioWatched,
+                undefined,
+                simklWatched,
+              ).watched,
+          )
+        )
+          return true;
+        const local = ids
+          .map(localCwEntry)
+          .filter((e) => e?.type === "series" && e.season === season && e.episode === episode)
+          .sort((a, b) => b!.t - a!.t)[0];
+        const st = item?.state;
+        const se = episodeFromVideoId(st?.video_id);
+        const sameEpisode =
+          (st?.season ?? se?.season) === season && (st?.episode ?? se?.episode) === episode;
+        const cloudTime = Date.parse(item?._mtime ?? st?.lastWatched ?? "");
+        if (local && (!sameEpisode || !Number.isFinite(cloudTime) || local.t >= cloudTime)) {
+          return isPlaybackFinished(local.durationMs, local.positionMs);
+        }
+        return !!item && sameEpisode && isFinishedSeries(item);
+      };
+      return resolveSeriesResume(
+        current,
+        resumeEpisodes?.id === meta.id ? resumeEpisodes.episodes : undefined,
+        watched,
+      );
+    },
+    [
+      meta.id,
+      resumeImdb,
+      detail,
+      libraryItem,
+      resumeEpisodes,
+      traktWatched,
+      simklWatched,
+      stremioWatched,
+    ],
+  );
+  const seriesResume = isSeries && !isAnime && lastPlayed ? resolveResume(lastPlayed) : null;
+  const lastPlay = seriesResume?.episode ?? lastPlayed;
 
   useEffect(() => {
     if (loading) return;
@@ -1040,8 +1140,11 @@ export function DetailView({
   const smartPlay = useCallback(
     async (forcePicker = false) => {
       if (inSession) claimHost(true);
-      const opts = { autoPlay: !forcePicker && settings.instantPlay, resume: !forcePicker };
-      const launch = (episode: PlayEpisode | undefined) => {
+      const launch = (episode: PlayEpisode | undefined, completed = false) => {
+        const opts = {
+          autoPlay: !forcePicker && settings.instantPlay,
+          resume: !forcePicker && !completed,
+        };
         const stream = () => openPicker(playMeta, episode, opts);
         if (forcePicker) {
           stream();
@@ -1060,7 +1163,12 @@ export function DetailView({
               videos: cinemetaFull?.videos,
               initialSeason: episode?.season,
               highlightEpisode: episode?.episode,
-              onPlayLocal: (e) => openPlayer(localPlayerSrc(e)),
+              onPlayLocal: (e) =>
+                openPlayer({
+                  ...localPlayerSrc(e),
+                  startFromZero:
+                    completed && e.season === episode?.season && e.episode === episode?.episode,
+                }),
               onStream: stream,
             });
             return;
@@ -1072,7 +1180,8 @@ export function DetailView({
           extraImdb: detail?.imdbId,
           mode: settings.localPlaybackMode,
           source: "manual",
-          playLocal: (e, o) => openPlayer({ ...localPlayerSrc(e), startFromZero: o?.fromStart }),
+          playLocal: (e, o) =>
+            openPlayer({ ...localPlayerSrc(e), startFromZero: completed || o?.fromStart }),
           playStream: stream,
           setMode: (m) => update({ localPlaybackMode: m }),
         });
@@ -1105,7 +1214,7 @@ export function DetailView({
         return;
       }
       if (lastPlay) {
-        launch({ season: lastPlay.season, episode: lastPlay.episode });
+        launch(lastPlay, seriesResume?.completed);
         return;
       }
       if (authKey) {
@@ -1118,7 +1227,7 @@ export function DetailView({
         for (const cid of candidates) {
           const item = await libraryGetOne(authKey, cid).catch(() => null);
           const st = item?.state;
-          if (st && (st.timeOffset ?? 0) > 0) {
+          if (st && ((st.timeOffset ?? 0) > 0 || (item && isFinishedSeries(item)))) {
             const se = episodeFromVideoId(st.video_id);
             const season = st.season ?? se?.season;
             const episode = st.episode ?? se?.episode;
@@ -1128,7 +1237,8 @@ export function DetailView({
               season >= 1 &&
               episode >= 1
             ) {
-              launch({ season, episode });
+              const resolved = resolveResume({ season, episode }, item);
+              launch(resolved.episode, resolved.completed);
               return;
             }
           }
@@ -1142,6 +1252,8 @@ export function DetailView({
       isAnime,
       animeEpisodes,
       lastPlay,
+      seriesResume?.completed,
+      resolveResume,
       openPicker,
       openPlayer,
       playMeta,
@@ -1159,7 +1271,7 @@ export function DetailView({
   const smartPlayLabel =
     inSession && !liveContext
       ? t("Play Together")
-      : isSeries && lastPlay
+      : isSeries && lastPlay && !seriesResume?.completed
         ? t("Resume S{s}:E{e}", { s: lastPlay.season, e: lastPlay.episode })
         : t("Play");
 
