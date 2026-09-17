@@ -4,24 +4,21 @@ import type { Meta } from "@/lib/cinemeta";
 import type { PlayEpisode } from "@/lib/view";
 import { getEpisodeProgress } from "@/lib/episode-progress";
 import { simklWatchedForId, statusForId, type WatchlistStatus } from "@/lib/simkl/list-status";
-import { episodeFromVideoId, isAnimeCwItem, libraryMetaType, type LibraryItem } from "@/lib/stremio";
+import {
+  episodeFromVideoId,
+  isAnimeCwItem,
+  libraryMetaType,
+  type LibraryItem,
+} from "@/lib/stremio";
 import { isNextAired, resurfaceCandidates, type AnimeMode } from "@/lib/cw-resurface";
+import { FINISHED_RATIO, isFinishedSeries } from "@/lib/episode-advance";
 
-const FINISHED_RATIO = 0.9;
 const ANIME_ID = /^(kitsu|mal|anilist|anidb):/;
 
 const EMPTY_TRAKT_WATCHED: Set<string> = new Set();
 const EMPTY_SIMKL_WATCHED: Map<string, Set<string>> = new Map();
 const EMPTY_ANILIST_WATCHED: Map<string, Set<string>> = new Map();
 const EMPTY_SIMKL_STATUS: Map<string, WatchlistStatus> = new Map();
-
-function isFinishedSeries(i: LibraryItem): boolean {
-  if (i.type !== "series" || !i.state) return false;
-  if ((i.state.flaggedWatched ?? 0) <= 0) return false;
-  const dur = i.state.duration ?? 0;
-  const off = i.state.timeOffset ?? 0;
-  return dur <= 0 || off / dur >= FINISHED_RATIO;
-}
 
 function currentEpisode(i: LibraryItem): { season: number; episode: number } | null {
   const season = i.state?.season;
@@ -133,10 +130,14 @@ export function useCwAdvance(
       const cur = currentEpisode(i);
       return (
         cur != null &&
-        watchedPredicate(i, cur, traktWatched, simklWatched, anilistWatched, simklStatus)(
-          cur.season,
-          cur.episode,
-        )
+        watchedPredicate(
+          i,
+          cur,
+          traktWatched,
+          simklWatched,
+          anilistWatched,
+          simklStatus,
+        )(cur.season, cur.episode)
       );
     });
     void (async () => {
@@ -200,9 +201,12 @@ export function useCwAdvance(
       const inCw = new Set(items.map((i) => i._id));
       const watchedFor = (item: LibraryItem, c: { season: number; episode: number }) =>
         watchedPredicate(item, c, traktWatched, simklWatched, anilistWatched, simklStatus);
-      const resurfaced = await resurfaceCandidates(lib, inCw, { tmdbKey, animeMode }, watchedFor).catch(
-        () => new Map<string, { season: number; episode: number }>(),
-      );
+      const resurfaced = await resurfaceCandidates(
+        lib,
+        inCw,
+        { tmdbKey, animeMode },
+        watchedFor,
+      ).catch(() => new Map<string, { season: number; episode: number }>());
       if (cancelled) return;
       const extraItems: LibraryItem[] = [];
       for (const [id, ep] of resurfaced) {
@@ -231,7 +235,19 @@ export function useCwAdvance(
     return () => {
       cancelled = true;
     };
-  }, [items, tmdbKey, enabled, library, animeMode, watchedVersion, traktWatched, simklWatched, anilistWatched, simklStatus, animeVersion]);
+  }, [
+    items,
+    tmdbKey,
+    enabled,
+    library,
+    animeMode,
+    watchedVersion,
+    traktWatched,
+    simklWatched,
+    anilistWatched,
+    simklStatus,
+    animeVersion,
+  ]);
 
   if (!enabled) return items;
   const base =
