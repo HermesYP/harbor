@@ -4642,5 +4642,11 @@
   "Zoom {pct}%": "Zoom {pct}%",
   "Zoom in": "Zoom in",
   "Zoom out": "Zoom out",
-  "العربية": "العربية"
+  "العربية": "العربية",
+  "Auto-skip stalled streams": "Auto-skip stalled streams",
+  "Recover automatically when startup stalls, using your play mode. Turn off to keep waiting. Playback errors can still trigger recovery.": "Recover automatically when startup stalls, using your play mode. Turn off to keep waiting. Playback errors can still trigger recovery.",
+  "Stalled stream timeout": "Stalled stream timeout",
+  "{seconds} seconds": "{seconds} seconds",
+  "Default (18s load; adaptive grace periods)": "Default (18s load; adaptive grace periods)",
+  "Custom timeouts are minimum waits. Peer-to-peer startup may take longer.": "Custom timeouts are minimum waits. Peer-to-peer startup may take longer."
 }
