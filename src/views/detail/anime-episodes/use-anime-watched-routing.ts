@@ -8,6 +8,7 @@ import {
   type ManualWatchedMeta,
 } from "@/lib/manual-watched";
 import { animeSeasonKey } from "./anime-season-key";
+import { isEpisodeReleased } from "@/lib/episode-released";
 
 export function useAnimeWatchedRouting(meta: Meta, franchise: FranchiseEntry[]) {
   const byId = useMemo(() => {
@@ -22,7 +23,7 @@ export function useAnimeWatchedRouting(meta: Meta, franchise: FranchiseEntry[]) 
   };
 
   const manualMetaFor = (metaId: string): ManualWatchedMeta => {
-    const m = metaId === meta.id ? meta : byId.get(metaId) ?? meta;
+    const m = metaId === meta.id ? meta : (byId.get(metaId) ?? meta);
     return { type: "series", name: m.name, poster: m.poster, background: m.background };
   };
 
@@ -30,6 +31,7 @@ export function useAnimeWatchedRouting(meta: Meta, franchise: FranchiseEntry[]) 
     if (displayEpisodes.length === 0) return;
     const groups = new Map<string, Array<{ season: number; episode: number }>>();
     for (const ep of displayEpisodes) {
+      if (watched && !isEpisodeReleased(ep.airdate)) continue;
       const id = ep.sourceMetaId ?? meta.id;
       const list = groups.get(id) ?? [];
       list.push({

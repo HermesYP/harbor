@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { Meta } from "@/lib/cinemeta";
 import { recordManualWatchedMeta, setManualWatchedMany } from "@/lib/manual-watched";
 import type { Episode } from "@/lib/providers/tmdb";
+import { isEpisodeReleased } from "@/lib/episode-released";
 import { markEpisodesWatched, unmarkEpisodeWatched } from "@/lib/simkl/history";
 import { stremioIdToSimklTarget } from "@/lib/simkl/ids";
 
@@ -18,7 +19,10 @@ export function useMarkSeason({
 }): (watched: boolean) => void {
   return useCallback(
     (watched: boolean) => {
-      if (enrichedEpisodes.length === 0) return;
+      const releasedEps = enrichedEpisodes.filter(
+        (ep) => !watched || isEpisodeReleased(ep.airDate),
+      );
+      if (releasedEps.length === 0) return;
       if (watched)
         recordManualWatchedMeta(meta.id, {
           type: "series",
@@ -28,7 +32,7 @@ export function useMarkSeason({
         });
       setManualWatchedMany(
         meta.id,
-        enrichedEpisodes.map((ep) => ({ season: ep.seasonNumber, episode: ep.episodeNumber })),
+        releasedEps.map((ep) => ({ season: ep.seasonNumber, episode: ep.episodeNumber })),
         watched,
       );
       if (!simklConnected) return;
@@ -42,9 +46,14 @@ export function useMarkSeason({
             : null);
       if (!showIds) return;
       if (watched) {
-        void markEpisodesWatched(showIds, active, enrichedEpisodes.map((e) => e.episodeNumber));
+        void markEpisodesWatched(
+          showIds,
+          active,
+          releasedEps.map((e) => e.episodeNumber),
+        );
       } else {
-        for (const e of enrichedEpisodes) void unmarkEpisodeWatched(showIds, active, e.episodeNumber);
+        for (const e of enrichedEpisodes)
+          void unmarkEpisodeWatched(showIds, active, e.episodeNumber);
       }
     },
     [meta, active, enrichedEpisodes, simklConnected],
