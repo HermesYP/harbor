@@ -37,21 +37,28 @@ export type SubRenderContext = {
 };
 
 let styleRequest = 0;
+// mpv reports its current directory, which may already be one we installed.
+const originalFontDirectories = new Map<string, string>();
 
 export async function applySubStyle(
   s: Settings,
   context: SubRenderContext = { assNativeActive: false, imageNativeActive: false },
 ): Promise<void> {
   const request = ++styleRequest;
-  const bundledFontsDir = await invoke<string>("mpv_get_property", { name: "sub-fonts-dir" }).catch(
+  const currentFontsDir = await invoke<string>("mpv_get_property", { name: "sub-fonts-dir" }).catch(
     () => "",
   );
+  if (request !== styleRequest) return;
+  const bundledFontsDir = originalFontDirectories.get(currentFontsDir) ?? currentFontsDir;
   let family = mpvFontFor(s.subFontFamily);
   if (s.subFontFamily.startsWith("custom:")) {
     try {
       const custom = await prepareMpvCustomFont(s);
       if (request !== styleRequest) return;
       if (custom) {
+        if (bundledFontsDir && bundledFontsDir !== custom.directory) {
+          originalFontDirectories.set(custom.directory, bundledFontsDir);
+        }
         await invoke("mpv_set_property", { name: "sub-fonts-dir", value: custom.directory });
         family = custom.family;
       }

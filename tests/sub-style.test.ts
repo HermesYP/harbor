@@ -193,13 +193,15 @@ test("restores bundled fonts when switching back from an upload", async () => {
   const originalWindow = globalThis.window;
   globalThis.window = {} as Window & typeof globalThis;
   const directorySets: string[] = [];
+  let currentDirectory = "C:/bundled/fonts";
   mockIPC((command, args) => {
-    if (command === "mpv_get_property") return "C:/bundled/fonts";
+    if (command === "mpv_get_property") return currentDirectory;
     if (command === "plugin:path|resolve_directory") return "C:/cache";
     if (command === "plugin:path|join") return (args as { paths: string[] }).paths.join("/");
     if (command === "plugin:fs|read_dir") return [];
     if (command === "mpv_set_property" && (args as { name: string }).name === "sub-fonts-dir") {
-      directorySets.push((args as { value: string }).value);
+      currentDirectory = (args as { value: string }).value;
+      directorySets.push(currentDirectory);
     }
   });
   try {
