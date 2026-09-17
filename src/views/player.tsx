@@ -83,10 +83,24 @@ import { markStreamDead, STUB_TTL_MS } from "@/lib/dead-streams";
 import type { VolumeIndicatorState } from "@/components/player/volume-indicator";
 import type { ToastInfo } from "@/views/addons/addons-types";
 import { SFX } from "@/lib/sfx";
+import {
+  PlayerWindowLockProvider,
+  PlayerWindowLockControl,
+  usePlayerWindowLock,
+} from "./player/player-window-lock";
 
 let hdrFallbackNoticeShown = false;
 
 export function PlayerView({ src }: { src: PlayerSrc }) {
+  return (
+    <PlayerWindowLockProvider>
+      <PlayerContent src={src} />
+    </PlayerWindowLockProvider>
+  );
+}
+
+function PlayerContent({ src }: { src: PlayerSrc }) {
+  const { setLocked: setPlayerLocked } = usePlayerWindowLock();
   const { setChromeHidden, topPath, openPicker, exitPlayback, replacePlayerSrc, exitPlayer } =
     useView();
   const { settings, update } = useSettings();
@@ -134,7 +148,12 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
   const videoMountRef = useRef<HTMLDivElement>(null);
   const bridgeRef = useRef<PlayerBridge | null>(null);
   const selfFrameReadyRef = useRef(false);
-  const { fullscreen, toggleFullscreen } = useFullscreen();
+  const { fullscreen, toggleFullscreen: toggleFullscreenWindow } = useFullscreen();
+  const toggleFullscreen = useCallback(() => {
+    void setPlayerLocked(false)
+      .then(toggleFullscreenWindow)
+      .catch(() => {});
+  }, [setPlayerLocked, toggleFullscreenWindow]);
   const { snap, engine, bridgeReady, bridgeKey, embedActive, svpActive } = usePlayerBridge({
     bridgeRef,
     videoMountRef,
@@ -169,7 +188,20 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
   const [hasStarted, setHasStarted] = useState(false);
   const cast = usePlayerCast({ src, debrids, snapRef, bridgeRef, settings });
   const [now, setNow] = useState(() => Date.now());
-  const { pipMode, togglePipMode, exitPip } = usePipMode({ bridgeRef, setChromeHidden });
+  const {
+    pipMode,
+    togglePipMode: togglePipWindow,
+    exitPip: exitPipWindow,
+  } = usePipMode({ bridgeRef, setChromeHidden });
+  const togglePipMode = useCallback(() => {
+    void setPlayerLocked(false)
+      .then(togglePipWindow)
+      .catch(() => {});
+  }, [setPlayerLocked, togglePipWindow]);
+  const exitPip = useCallback(async () => {
+    await setPlayerLocked(false);
+    await exitPipWindow();
+  }, [setPlayerLocked, exitPipWindow]);
   const { slowLoad, transcodedUrl, sourceError, clearSourceError } = useAutoRetry({
     bridgeRef,
     src,
@@ -793,6 +825,11 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
     },
   });
 
+  useEffect(() => {
+    // The separate HDR stage has its own controls; never hide the only unlock action.
+    if (hdrStageRequested) void setPlayerLocked(false).catch(() => {});
+  }, [hdrStageRequested, setPlayerLocked]);
+
   const { mpvEmbedWindowsActive, stageBg } = embedFlags(
     engine,
     embedActive,
@@ -1030,6 +1067,7 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
         }}
       />
       {!hdrStageActive && <PlayerOverlayLayers {...overlayProps} />}
+      {!hdrStageActive && <PlayerWindowLockControl visible={showChrome} />}
       {sourceError && (
         <SourceErrorCard
           error={sourceError}
