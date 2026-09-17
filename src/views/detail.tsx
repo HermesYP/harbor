@@ -973,6 +973,10 @@ export function DetailView({
   const currentFranchiseId = animeCanonicalId ?? meta.id;
 
   const lastPlay = useMemo(() => {
+    // These revisions invalidate reads from the external stores below.
+    void seriesWatchedVer;
+    void localCwVer;
+    void resumeVer;
     if (episodeHint) return episodeHint;
     const ids = Array.from(
       new Set(
