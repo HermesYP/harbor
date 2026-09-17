@@ -250,6 +250,7 @@ export const DEFAULT: Settings = {
   mpvQuality: "balanced",
   mpvHwdec: "auto",
   mpvBufferBoost: false,
+  mpvBufferSize: "auto",
   mpvDownmixStereo: false,
   mpvTweaks: {},
   playerSvp: false,

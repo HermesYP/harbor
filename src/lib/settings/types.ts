@@ -288,6 +288,7 @@ export type Settings = {
   mpvQuality: "balanced" | "performance" | "quality";
   mpvHwdec: "auto" | "on" | "off";
   mpvBufferBoost: boolean;
+  mpvBufferSize: "auto" | "small" | "large";
   mpvDownmixStereo: boolean;
   mpvTweaks: Record<string, string>;
   playerSvp: boolean;

@@ -1,4 +1,8 @@
 {
+  "Buffer size": "Buffer size",
+  "Small (128 MiB)": "Small (128 MiB)",
+  "Large (1 GiB)": "Large (1 GiB)",
+  "Auto keeps Harbor's separate defaults for live and on-demand video. Small reads up to 1 minute ahead; Large reads up to 10 minutes and waits for a reserve before starting. Sizes are forward-buffer limits, not total memory use. Takes effect on the next thing you play. Advanced mpv options can override this setting.": "Auto keeps Harbor's separate defaults for live and on-demand video. Small reads up to 1 minute ahead; Large reads up to 10 minutes and waits for a reserve before starting. Sizes are forward-buffer limits, not total memory use. Takes effect on the next thing you play. Advanced mpv options can override this setting.",
   " · {n} instant": " · {n} instant",
   " · away": " · away",
   " · host": " · host",
