@@ -2,6 +2,25 @@ const KEY = "harbor.resume";
 
 type Entry = { ms: number; t: number };
 
+const subs = new Set<() => void>();
+let version = 0;
+
+function notify(): void {
+  version += 1;
+  for (const fn of subs) fn();
+}
+
+export function subscribeResume(fn: () => void): () => void {
+  subs.add(fn);
+  return () => {
+    subs.delete(fn);
+  };
+}
+
+export function resumeVersion(): number {
+  return version;
+}
+
 function entryKey(id: string, season?: number, episode?: number): string {
   if (typeof season === "number" && typeof episode === "number") {
     return `${id}|s${season}e${episode}`;
@@ -24,14 +43,10 @@ function writeAll(all: Record<string, Entry>): void {
   } catch {
     /* noop */
   }
+  notify();
 }
 
-export function saveResumeMs(
-  id: string,
-  ms: number,
-  season?: number,
-  episode?: number,
-): void {
+export function saveResumeMs(id: string, ms: number, season?: number, episode?: number): void {
   if (!Number.isFinite(ms) || ms < 0) return;
   if (typeof season === "number" && typeof episode === "number") {
     if (season < 0 || episode < 1) return;
@@ -57,11 +72,7 @@ export function saveResumeBatch(
   writeAll(all);
 }
 
-export function readResumeMs(
-  id: string,
-  season?: number,
-  episode?: number,
-): number {
+export function readResumeMs(id: string, season?: number, episode?: number): number {
   const all = readAll();
   return all[entryKey(id, season, episode)]?.ms ?? 0;
 }
