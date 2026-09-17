@@ -1,4 +1,5 @@
 import { PauseCircle, PlayCircle } from "lucide-react";
+import { usePlayerWindowLock } from "@/views/player/player-window-lock";
 import type { PlayerSnapshot } from "@/lib/player/bridge";
 import { useT } from "@/lib/i18n";
 import { Tooltip } from "./tooltip";
@@ -40,25 +41,30 @@ export function PipChrome({
   onNextEp: () => void;
 }) {
   const t = useT();
+  const { locked, isLocked } = usePlayerWindowLock();
   const muted = snap.muted || snap.volume === 0;
   return (
     <>
       <div
-        data-tauri-drag-region
+        data-tauri-drag-region={locked ? undefined : ""}
         aria-hidden
         className="absolute inset-0 z-10"
       />
-      <div
-        aria-hidden
-        onPointerDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          void import("@tauri-apps/api/window")
-            .then(({ getCurrentWindow }) => getCurrentWindow().startResizeDragging("SouthEast"))
-            .catch(() => {});
-        }}
-        className="pointer-events-auto absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize"
-      />
+      {!locked && (
+        <div
+          aria-hidden
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void import("@tauri-apps/api/window")
+              .then(({ getCurrentWindow }) => {
+                if (!isLocked()) return getCurrentWindow().startResizeDragging("SouthEast");
+              })
+              .catch(() => {});
+          }}
+          className="pointer-events-auto absolute bottom-0 right-0 z-30 h-4 w-4 cursor-nwse-resize"
+        />
+      )}
 
       <div
         className={`pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between bg-gradient-to-b from-black/70 via-black/30 to-transparent px-3 pt-2.5 pb-8 transition-opacity duration-200 ${
@@ -83,7 +89,16 @@ export function PipChrome({
             className="pointer-events-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/15 bg-black/55 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/95 backdrop-blur-md transition-colors hover:bg-black/85"
             aria-label={t("Exit Picture in Picture")}
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M3 9V5a2 2 0 0 1 2-2h4" />
               <path d="M21 9V5a2 2 0 0 0-2-2h-4" />
               <path d="M3 15v4a2 2 0 0 0 2 2h4" />
@@ -117,7 +132,16 @@ export function PipChrome({
             onClick={() => onSeekStep(-30)}
             stepText="30s"
             icon={
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M3 12a9 9 0 1 0 3-6.7" />
                 <polyline points="3 4 3 10 9 10" />
               </svg>
@@ -142,7 +166,16 @@ export function PipChrome({
             onClick={() => onSeekStep(30)}
             stepText="30s"
             icon={
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M21 12a9 9 0 1 1-3-6.7" />
                 <polyline points="21 4 21 10 15 10" />
               </svg>

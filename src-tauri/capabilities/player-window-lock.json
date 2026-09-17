@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "player-window-lock",
+  "description": "Allow the main player to temporarily disable native resizing",
+  "windows": ["main"],
+  "permissions": [
+    "core:window:allow-set-maximizable",
+    "core:window:allow-is-maximizable",
+    "core:window:allow-set-resizable",
+    "core:window:allow-is-resizable"
+  ]
+}

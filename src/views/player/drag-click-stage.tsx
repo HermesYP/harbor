@@ -1,3 +1,5 @@
+import { usePlayerWindowLock } from "./player-window-lock";
+
 export function DragClickStage(props: {
   drawMode: boolean;
   pipMode: boolean;
@@ -6,6 +8,7 @@ export function DragClickStage(props: {
   onWheelVolume?: (deltaY: number) => void;
 }) {
   const { drawMode, pipMode, onClick, onDoubleClick, onWheelVolume } = props;
+  const { isLocked } = usePlayerWindowLock();
   return (
     <div
       className="pointer-events-auto absolute inset-0 z-[3]"
@@ -23,7 +26,7 @@ export function DragClickStage(props: {
         const startTime = Date.now();
         let dragStarted = false;
         const onMove = (ev: MouseEvent) => {
-          if (dragStarted) return;
+          if (dragStarted || isLocked()) return;
           if (Date.now() - startTime < 150) return;
           const dx = Math.abs(ev.clientX - startX);
           const dy = Math.abs(ev.clientY - startY);
@@ -32,7 +35,9 @@ export function DragClickStage(props: {
             window.removeEventListener("mousemove", onMove);
             window.removeEventListener("mouseup", onUp);
             import("@tauri-apps/api/window")
-              .then(({ getCurrentWindow }) => getCurrentWindow().startDragging())
+              .then(({ getCurrentWindow }) => {
+                if (!isLocked()) return getCurrentWindow().startDragging();
+              })
               .catch(() => {});
           }
         };
@@ -46,7 +51,7 @@ export function DragClickStage(props: {
       }}
       onDoubleClick={(e) => {
         if (e.target !== e.currentTarget) return;
-        if (drawMode || pipMode) return;
+        if (drawMode || pipMode || isLocked()) return;
         onDoubleClick();
       }}
     />
