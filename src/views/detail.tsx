@@ -1050,6 +1050,7 @@ export function DetailView({
         ),
       ];
       const watched = (season: number, episode: number) => {
+        if (ids.some((id) => manualWatchedState(id, season, episode) === false)) return false;
         if (
           ids.some(
             (id) =>
@@ -1090,7 +1091,7 @@ export function DetailView({
     [
       meta.id,
       resumeImdb,
-      detail?.id,
+      detail,
       libraryItem,
       resumeEpisodes,
       traktWatched,

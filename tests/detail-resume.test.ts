@@ -74,6 +74,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
     simklWatched: new Set(),
     stremioWatched: new Set(),
     getEpisodeProgress,
+    manualWatchedState: () => undefined,
     isFinishedSeries,
     isPlaybackFinished,
     resolveSeriesResume,
@@ -296,6 +297,31 @@ test("local playback highlights up-next and restarts a completed finale", async 
   await play({ ...overrides, resumeEpisodes: { id: "tt0121955", episodes: [current] } });
   options?.onPlayLocal({ season: 22, episode: 7 });
   assert.equal(played?.startFromZero, true);
+});
+
+test("manual unwatched overrides stale completion and tracker state across aliases", async () => {
+  const manualWatchedState = (id: string, season: number, episode: number) =>
+    id === "tt0121955" && season === 22 && episode === 7 ? false : undefined;
+  const progress = evaluate(progressSource + "\nreturn getEpisodeProgress;", {
+    manualWatchedState,
+    lastPlayedEpisode: () => null,
+    readResumeEntry: () => null,
+  });
+  for (const detail of [null, { id: 5 }]) {
+    const result = await play({
+      detail,
+      manualWatchedState,
+      getEpisodeProgress: progress,
+      stremioWatched: new Set(["22:7"]),
+      traktWatched: new Set(["imdb:tt0121955:22:7"]),
+      libraryItem: {
+        type: "series",
+        state: { ...current, timeOffset: 950, duration: 1000, flaggedWatched: 1 },
+      },
+    });
+    assert.deepEqual(result.calls[0].episode, current);
+    assert.equal(result.label, "Resume S22:E7");
+  }
 });
 
 test("cloud watched flags with cleared offsets still resolve up-next", () => {
