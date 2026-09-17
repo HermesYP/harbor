@@ -56,6 +56,28 @@ test("bigger buffer mode increases Harbor defaults and waits for a useful reserv
   assert.ok(!options.includes("demuxer-readahead-secs=20"));
 });
 
+test("small buffer selection sets every native buffer limit and overrides legacy boost", () => {
+  const settings = {
+    mpvQuality: "balanced",
+    mpvHwdec: "auto",
+    mpvBufferBoost: true,
+    mpvBufferSize: "small",
+  } as unknown as Settings;
+  const options = compileMpvOptions(settings).split("\n");
+  for (const option of [
+    "cache=yes",
+    "cache-secs=60",
+    "demuxer-max-bytes=128MiB",
+    "demuxer-max-back-bytes=32MiB",
+    "demuxer-readahead-secs=60",
+    "stream-buffer-size=8MiB",
+  ]) {
+    assert.ok(options.includes(option), `missing ${option}`);
+  }
+  assert.ok(!options.includes("demuxer-max-bytes=1GiB"));
+  assert.ok(!options.includes("cache-pause-wait=10"));
+});
+
 test("SVP uses a removable labeled VapourSynth filter", () => {
   const settings = { svpVpyPath: "/home/user/.local/share/harbor/svp/svp.vpy" } as Settings;
   const options = svpMpvLines(settings, true).split("\n");

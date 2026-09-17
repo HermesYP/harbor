@@ -30,11 +30,24 @@ export function compileMpvOptions(s: Settings): string {
   const lines: string[] = [...(QUALITY_LINES[s.mpvQuality] ?? [])];
   if (s.mpvHwdec === "on") lines.push("hwdec=yes");
   else if (s.mpvHwdec === "off") lines.push("hwdec=no");
-  if (s.mpvBufferBoost) {
+  const bufferSize = s.mpvBufferSize ?? (s.mpvBufferBoost ? "large" : "auto");
+  if (bufferSize === "small") {
+    lines.push(
+      "cache=yes",
+      "cache-secs=60",
+      "demuxer-max-bytes=128MiB",
+      "demuxer-max-back-bytes=32MiB",
+      "demuxer-readahead-secs=60",
+      "stream-buffer-size=8MiB",
+    );
+  }
+  if (bufferSize === "large") {
     lines.push(
       "cache=yes",
       "cache-secs=600",
       "demuxer-max-bytes=1GiB",
+      "demuxer-max-back-bytes=128MiB",
+      "stream-buffer-size=64MiB",
       "demuxer-readahead-secs=600",
       "cache-pause-initial=yes",
       "cache-pause-wait=10",

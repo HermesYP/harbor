@@ -163,6 +163,14 @@ export function loadStoredSettings(rawKey: string = STORAGE_KEY): Settings {
       ...DEFAULT,
       ...parsed,
       ...posterCards,
+      mpvBufferSize:
+        parsed.mpvBufferSize === "auto" ||
+        parsed.mpvBufferSize === "small" ||
+        parsed.mpvBufferSize === "large"
+          ? parsed.mpvBufferSize
+          : parsed.mpvBufferBoost === true
+            ? "large"
+            : "auto",
       posterDockTransitionMs: sanitizePosterDockTransition(parsed.posterDockTransitionMs),
       uiLanguage: resolveUiLanguage(parsed.uiLanguage),
       streaming: { ...DEFAULT.streaming, ...(parsed.streaming ?? {}) },
