@@ -1,4 +1,4 @@
-use mdns_sd::{ServiceDaemon, ServiceEvent};
+use mdns_sd::ServiceInfo;
 use rust_cast::{
     channels::{
         media::{Media, Metadata, MovieMediaMetadata, StreamType},
@@ -17,6 +17,7 @@ use std::time::Duration;
 use crate::airplay;
 use crate::cast_subs::{self, CastSub, CastSubStyle};
 use crate::dlna;
+use crate::mdns_browse;
 use crate::roku;
 use crate::stream_proxy::{ProxyState, RegisterArgs};
 use crate::transcode::TranscodeProfile;
@@ -391,58 +392,61 @@ fn pick_address(addrs: &std::collections::HashSet<IpAddr>) -> Option<IpAddr> {
     })
 }
 
-async fn discover_chromecasts() -> Vec<CastDeviceInfo> {
-    tokio::task::spawn_blocking(|| -> Vec<CastDeviceInfo> {
-        let Ok(daemon) = ServiceDaemon::new() else {
-            return Vec::new();
+/// Maps resolved `_googlecast._tcp.local.` records to devices.
+fn chromecast_devices(infos: &[ServiceInfo]) -> Vec<CastDeviceInfo> {
+    let mut devices: HashMap<String, CastDeviceInfo> = HashMap::new();
+    for info in infos {
+        let addrs = info.get_addresses();
+        let Some(addr) = pick_address(addrs) else {
+            continue;
         };
-        let Ok(receiver) = daemon.browse(CAST_SERVICE_TYPE) else {
-            return Vec::new();
-        };
-        let deadline = std::time::Instant::now() + Duration::from_millis(DISCOVERY_TIMEOUT_MS);
-        let mut devices: HashMap<String, CastDeviceInfo> = HashMap::new();
-        while std::time::Instant::now() < deadline {
-            match receiver.recv_timeout(Duration::from_millis(120)) {
-                Ok(ServiceEvent::ServiceResolved(info)) => {
-                    let addrs = info.get_addresses();
-                    let Some(addr) = pick_address(addrs) else {
-                        continue;
-                    };
-                    let port = info.get_port();
-                    let host = addr.to_string();
-                    let props_map: HashMap<String, String> = info
-                        .get_properties()
-                        .iter()
-                        .map(|p| (p.key().to_string(), p.val_str().to_string()))
-                        .collect();
-                    let name = parse_friendly_name(&props_map)
-                        .unwrap_or_else(|| info.get_fullname().to_string());
-                    let model = parse_model(&props_map);
-                    let id = format!("cc-{}-{}", host, port);
-                    let audio_only = detect_audio_only(&name, &model, "chromecast");
-                    devices.insert(
-                        id.clone(),
-                        CastDeviceInfo {
-                            id,
-                            name,
-                            host,
-                            port,
-                            model,
-                            kind: "chromecast".into(),
-                            control_url: None,
-                            audio_only,
-                        },
-                    );
-                }
-                Ok(_) => {}
-                Err(_) => {}
+        let port = info.get_port();
+        let host = addr.to_string();
+        let props_map: HashMap<String, String> = info
+            .get_properties()
+            .iter()
+            .map(|p| (p.key().to_string(), p.val_str().to_string()))
+            .collect();
+        let name =
+            parse_friendly_name(&props_map).unwrap_or_else(|| info.get_fullname().to_string());
+        let model = parse_model(&props_map);
+        let id = format!("cc-{}-{}", host, port);
+        let audio_only = detect_audio_only(&name, &model, "chromecast");
+        devices.insert(
+            id.clone(),
+            CastDeviceInfo {
+                id,
+                name,
+                host,
+                port,
+                model,
+                kind: "chromecast".into(),
+                control_url: None,
+                audio_only,
+            },
+        );
+    }
+    devices.into_values().collect()
+}
+
+/// Tags probed AirPlay devices for the cast picker.
+fn airplay_cast_devices(devices: Vec<airplay::AirPlayDevice>) -> Vec<CastDeviceInfo> {
+    devices
+        .into_iter()
+        .map(|d| {
+            let audio_only = detect_audio_only(&d.name, &d.model, "airplay");
+            CastDeviceInfo {
+                id: d.id,
+                name: d.name,
+                host: d.host,
+                port: d.port,
+                model: d.model,
+                kind: "airplay".into(),
+                control_url: None,
+                audio_only,
             }
-        }
-        let _ = daemon.shutdown();
-        devices.into_values().collect()
-    })
-    .await
-    .unwrap_or_default()
+        })
+        .collect()
 }
 
 async fn discover_dlna() -> Vec<CastDeviceInfo> {
@@ -492,24 +496,9 @@ fn split_host_port(host_str: &str) -> Option<(String, u16)> {
     Some((h.to_string(), port))
 }
 
-async fn discover_airplay() -> Vec<CastDeviceInfo> {
-    airplay::discover(DISCOVERY_TIMEOUT_MS)
-        .await
-        .into_iter()
-        .map(|d| {
-            let audio_only = detect_audio_only(&d.name, &d.model, "airplay");
-            CastDeviceInfo {
-                id: d.id,
-                name: d.name,
-                host: d.host,
-                port: d.port,
-                model: d.model,
-                kind: "airplay".into(),
-                control_url: None,
-                audio_only,
-            }
-        })
-        .collect()
+async fn discover_airplay(infos: &[ServiceInfo]) -> Vec<CastDeviceInfo> {
+    let devices = airplay::devices_from_services(infos);
+    airplay_cast_devices(airplay::filter_legacy(devices).await)
 }
 
 fn kind_priority(kind: &str) -> u8 {
@@ -559,12 +548,40 @@ fn dedupe_by_host(devices: Vec<CastDeviceInfo>) -> Vec<CastDeviceInfo> {
 
 #[tauri::command]
 pub async fn cast_discover() -> Result<Vec<CastDeviceInfo>, String> {
-    let (cc, dl, rk, ap) = tokio::join!(
-        discover_chromecasts(),
-        discover_dlna(),
-        discover_roku(),
-        discover_airplay(),
-    );
+    // Chromecast and AirPlay share one mDNS daemon for the whole pass. mdns-sd
+    // daemons must be shut down and awaited, so discovery owns exactly one; see
+    // crate::mdns_browse for the lifecycle rules. The AirPlay probe stays in this
+    // branch so it overlaps the DLNA and Roku scans instead of following them.
+    let discover_mdns = async {
+        let result = tokio::task::spawn_blocking(|| {
+            mdns_browse::browse_all(
+                &[CAST_SERVICE_TYPE, airplay::AIRPLAY_SERVICE_TYPE],
+                Duration::from_millis(DISCOVERY_TIMEOUT_MS),
+            )
+        })
+        .await
+        .unwrap_or_default();
+
+        let cc = chromecast_devices(
+            result
+                .services
+                .get(CAST_SERVICE_TYPE)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        );
+        let ap = discover_airplay(
+            result
+                .services
+                .get(airplay::AIRPLAY_SERVICE_TYPE)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+        .await;
+        (cc, ap)
+    };
+
+    let ((cc, ap), dl, rk) = tokio::join!(discover_mdns, discover_dlna(), discover_roku());
+
     let merged: Vec<CastDeviceInfo> = cc.into_iter().chain(dl).chain(rk).chain(ap).collect();
     let mut out = dedupe_by_host(merged);
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -1349,8 +1366,95 @@ fn drain_briefly(device: &CastDevice<'_>, ms: u64) {
 
 #[cfg(test)]
 mod cast_validation_tests {
-    use super::{replace_active_session, required_control_url, ActiveSession, ACTIVE};
+    use super::{
+        airplay_cast_devices, chromecast_devices, replace_active_session, required_control_url,
+        ActiveSession, ACTIVE, CAST_SERVICE_TYPE,
+    };
+    use crate::airplay;
+    use mdns_sd::ServiceInfo;
     use std::sync::{Arc, Mutex};
+
+    fn chromecast_info(name: &str, props: &[(&str, &str)]) -> ServiceInfo {
+        ServiceInfo::new(
+            CAST_SERVICE_TYPE,
+            name,
+            "harbor-test.local.",
+            "192.168.1.24",
+            8009,
+            props,
+        )
+        .expect("chromecast service info")
+    }
+
+    #[test]
+    fn chromecast_records_map_to_picker_entries() {
+        let info = chromecast_info(
+            "Living Room TV",
+            &[("fn", "Living Room TV"), ("md", "Chromecast Ultra")],
+        );
+
+        let devices = chromecast_devices(&[info]);
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].id, "cc-192.168.1.24-8009");
+        assert_eq!(devices[0].name, "Living Room TV");
+        assert_eq!(devices[0].host, "192.168.1.24");
+        assert_eq!(devices[0].port, 8009);
+        assert_eq!(devices[0].model.as_deref(), Some("Chromecast Ultra"));
+        assert_eq!(devices[0].kind, "chromecast");
+        assert!(!devices[0].audio_only);
+    }
+
+    #[test]
+    fn chromecast_records_without_txt_fall_back_to_the_fullname() {
+        let no_props: &[(&str, &str)] = &[];
+        let info = chromecast_info("Nest Mini", no_props);
+
+        let devices = chromecast_devices(&[info]);
+
+        assert_eq!(
+            devices[0].name,
+            format!("Nest Mini.{CAST_SERVICE_TYPE}"),
+            "the instance name should be used when TXT has no friendly name"
+        );
+        assert_eq!(devices[0].model, None);
+    }
+
+    #[test]
+    fn repeated_chromecast_records_for_one_host_collapse() {
+        let devices = chromecast_devices(&[
+            chromecast_info("One", &[("fn", "One")]),
+            chromecast_info("Two", &[("fn", "Two")]),
+        ]);
+
+        assert_eq!(devices.len(), 1, "same host and port must yield one entry");
+    }
+
+    #[test]
+    fn airplay_records_map_to_picker_entries() {
+        let props: &[(&str, &str)] = &[("model", "AppleTV6,2")];
+        let info = ServiceInfo::new(
+            airplay::AIRPLAY_SERVICE_TYPE,
+            "Bedroom",
+            "harbor-test.local.",
+            "192.168.1.30",
+            7000,
+            props,
+        )
+        .expect("airplay service info");
+
+        let airplay_devices = airplay::devices_from_services(&[info]);
+        assert_eq!(airplay_devices.len(), 1);
+        assert_eq!(airplay_devices[0].id, "airplay-192.168.1.30-7000");
+        assert_eq!(airplay_devices[0].name, "Bedroom");
+        assert_eq!(airplay_devices[0].model.as_deref(), Some("AppleTV6,2"));
+
+        let devices = airplay_cast_devices(airplay_devices);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].kind, "airplay");
+        assert_eq!(devices[0].port, 7000);
+        assert_eq!(devices[0].control_url, None);
+    }
 
     #[test]
     fn control_url_is_required_before_starting_dlna_or_roku() {
