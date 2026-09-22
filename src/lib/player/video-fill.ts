@@ -1,8 +1,3 @@
-// Framework-independent picture-shape policy for the player (issue #1393).
-// mpv remains the source of truth: these helpers only describe which property
-// values Harbor pushes (panscan, video-zoom, video-aspect-override, keepaspect)
-// when the user changes crop/aspect mode or steps manual zoom.
-
 export type CropMode = {
   id: string;
   label: string;
@@ -12,17 +7,11 @@ export type CropMode = {
   stretch?: boolean;
 };
 
-// mpv `video-zoom` is base-2 log2 scale: 0 = 100% (source size), 1 = 200%.
-// Zoom-out never shrinks below the source size, so the frame always covers
-// the window without introducing new bars.
+// mpv video-zoom uses log2 scale relative to the fitted image: 0 = 100%, 1 = 200%.
 export const ZOOM_MIN = 0;
 export const ZOOM_MAX = 1;
 
-// log2 step per zoom press. 0.05 is ~+3.6% scale per press: fine enough to
-// land just past a baked-in black-bar boundary (issue #1393 asked for finer
-// adjustment than the previous 0.1 step, which overshot by up to ~7% scale
-// per press) while still reaching full ultrawide pillarbox clearance in a
-// handful of presses.
+// Roughly 3.6% per press, allowing finer crop adjustment than the previous 7.2%.
 export const ZOOM_STEP = 0.05;
 
 // Zoom and Stretch are deliberately distinct: Zoom scales the source uniformly
