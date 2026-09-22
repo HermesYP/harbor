@@ -94,7 +94,7 @@ function hostedStream(): Record<string, unknown> {
   };
 }
 
-function resolveHosted(stream: Record<string, unknown>) {
+function resolveHosted(stream: Record<string, unknown>, allowP2pFallback = true) {
   return resolveStream(
     stream as never,
     [],
@@ -102,7 +102,7 @@ function resolveHosted(stream: Record<string, unknown>) {
     true,
     false,
     undefined,
-    true,
+    allowP2pFallback,
     true,
   );
 }
@@ -138,6 +138,28 @@ test("when the engine declines, the addon url stays playable with no engine fail
     assert.equal(r.via, "direct");
     assert.equal(r.data.url, HOSTED_URL);
   }
+});
+
+test("a disabled P2P fallback never starts the local engine for a hosted URL", async () => {
+  reset();
+  const r = await resolveHosted(hostedStream(), false);
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.via, "direct");
+    assert.equal(r.data.url, HOSTED_URL);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test("hosted URLs do not bypass an explicitly configured remote server with local P2P", async () => {
+  reset({ remoteStreamServerUrl: "http://192.168.1.50:11470" });
+  const r = await resolveHosted(hostedStream());
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.via, "direct");
+    assert.equal(r.data.url, HOSTED_URL);
+  }
+  assert.equal(calls.length, 0);
 });
 
 test("ordinary direct urls never consult the engine", async () => {
