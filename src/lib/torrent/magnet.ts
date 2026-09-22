@@ -86,8 +86,7 @@ export function infoHashFromUrl(url: string): { infoHash: string; fileIdx?: numb
   const fileIdx = m[2] != null ? Number(m[2]) : undefined;
   return {
     infoHash: m[1].toLowerCase(),
-    fileIdx:
-      fileIdx != null && Number.isSafeInteger(fileIdx) && fileIdx >= 0 ? fileIdx : undefined,
+    fileIdx: fileIdx != null && Number.isSafeInteger(fileIdx) && fileIdx >= 0 ? fileIdx : undefined,
   };
 }
 
@@ -125,7 +124,9 @@ function base32ToHex(input: string): string | null {
   }
   let hex = "";
   for (let i = 0; i + 8 <= bits.length; i += 8) {
-    hex += parseInt(bits.slice(i, i + 8), 2).toString(16).padStart(2, "0");
+    hex += parseInt(bits.slice(i, i + 8), 2)
+      .toString(16)
+      .padStart(2, "0");
   }
   return hex.length === 40 ? hex : null;
 }

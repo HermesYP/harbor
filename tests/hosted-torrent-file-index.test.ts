@@ -274,9 +274,7 @@ test("addon parsing never inherits an index from a non-hosted URL", async () => 
 
 test("legacy uncached hash derivation keeps the hash but not a non-hosted URL's index", async () => {
   reset();
-  const streams = await fetchMapped([
-    { url: `${PROXY_URL}/${HASH}/3`, name: "⚠ uncached" },
-  ]);
+  const streams = await fetchMapped([{ url: `${PROXY_URL}/${HASH}/3`, name: "⚠ uncached" }]);
   assert.equal(streams[0].infoHash, HASH, "the legacy hash derivation is preserved");
   assert.equal(streams[0].fileIdx, undefined, "but a non-hosted URL must not donate its index");
 });

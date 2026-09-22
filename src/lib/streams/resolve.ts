@@ -362,8 +362,7 @@ async function tryLocalEngine(
   const urlIdx = isHostedTorrentServerUrl(stream.url)
     ? fileIdxFromUrlForHash(stream.url, stream.infoHash)
     : undefined;
-  const urlBackedIdx =
-    urlIdx != null && (ownIdx == null || ownIdx === urlIdx) ? urlIdx : undefined;
+  const urlBackedIdx = urlIdx != null && (ownIdx == null || ownIdx === urlIdx) ? urlIdx : undefined;
   const intendedIdx = ownIdx ?? urlIdx;
   const added = await torrentEngineAdd(
     magnetFromHash(stream.infoHash),
