@@ -255,6 +255,8 @@ const profileFill: Record<string, string> = {
     "بعض القوائم لم تعد قابلة للتمييز. أزلها لتفعيل الحفظ.",
   "Removing a list not in your library deletes it from your profile.":
     "إزالة قائمة غير موجودة في مكتبتك تحذفها من ملفك الشخصي.",
+  "Lists changed while this picker was open. Reopen it before saving.":
+    "تغيّرت القوائم أثناء فتح هذه النافذة. أعد فتحها قبل الحفظ.",
   "Could not verify AniList lists. Reopen this picker to try again.":
     "تعذّر التحقق من قوائم AniList. أعد فتح هذه القائمة للمحاولة مرة أخرى.",
   "1 friend in common": "صديق واحد مشترك",

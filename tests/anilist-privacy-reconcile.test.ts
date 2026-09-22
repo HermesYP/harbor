@@ -114,6 +114,36 @@ test("private-empty: an all-private AniList list never re-enters the payload and
   assert.deepEqual(payload.map((l) => l.name).sort(), ["Local faves", "Other", "Public"].sort());
 });
 
+test("stale selected ids cannot silently disappear from a clear:true featured save", () => {
+  const formerlyVisible: PickableList = {
+    id: "local-1",
+    name: "My list",
+    source: "local",
+    items: [item("tt1")],
+  };
+  const privacy: FeaturedPrivacy = {
+    anilistNames: [],
+    anilistVerified: false,
+    anilistConnected: false,
+  };
+  assert.equal(hasUnprovenSelection([formerlyVisible], [formerlyVisible.id], privacy), false);
+  // Another view deletes or changes the custom list while this picker is
+  // still open: dropping its now-missing selected id would delete a served row.
+  const nextEntries: PickableList[] = [];
+  assert.equal(hasUnprovenSelection(nextEntries, [formerlyVisible.id], privacy), true);
+  assert.deepEqual(publishableSelection(nextEntries, [formerlyVisible.id], privacy), []);
+  assert.equal(
+    isSaveReady(
+      { handle: "alice", anilistUserId: null },
+      "alice",
+      null,
+      false,
+      hasUnprovenSelection(nextEntries, [formerlyVisible.id], privacy),
+    ),
+    false,
+  );
+});
+
 test("wiring: reconcileFeatured surfaces unmatched served rows as ghosts and selects them", () => {
   const candidates = buildProfileLists([
     group({ name: "Public", isCustomList: true, entries: [entry(2, media(31, 31))] }),

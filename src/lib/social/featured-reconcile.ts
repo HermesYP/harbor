@@ -139,11 +139,9 @@ export function publishableSelection(
 }
 
 /**
- * True when the current selection contains a displayed row whose items may
- * not be republished. The picker disables Save in that case and relies on the
- * existing per-row remove button as the explicit way out — the alternative,
- * filtering such rows at save time, would silently delete them from the
- * public profile.
+ * True when a selected row is unpublishable OR disappeared from the candidate
+ * set while the picker was open. In either case filtering it at Save time
+ * would silently delete a previously served entry from the public profile.
  */
 export function hasUnprovenSelection(
   entries: PickableList[],
@@ -153,7 +151,7 @@ export function hasUnprovenSelection(
   const byId = new Map(entries.map((e) => [e.id, e] as const));
   for (const id of selected) {
     const entry = byId.get(id);
-    if (entry && !isPublishable(entry, privacy)) return true;
+    if (!entry || !isPublishable(entry, privacy)) return true;
   }
   return false;
 }

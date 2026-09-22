@@ -222,6 +222,8 @@ test("picker: AniList candidates join the pickable set only when verified, gated
   );
   assert.match(src, /useSyncExternalStore\(subscribeAuthor, currentAuthor\)/);
   assert.match(src, /setServed\(\[\]\);/);
+  assert.match(src, /selectedEntries\.length !== selected\.length/);
+  assert.match(src, /Lists changed while this picker was open\. Reopen it before saving\./);
   assert.match(src, /\[handle, anilistUserId\]/);
   assert.match(src, /disabled=\{saving \|\| !ready\}/);
   // a connected fetch that failed never marks the load complete

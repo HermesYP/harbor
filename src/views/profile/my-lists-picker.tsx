@@ -193,8 +193,11 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
     () => entries.filter((e) => !selected.includes(e.id)),
     [entries, selected],
   );
+  // Candidate lists can change while this picker is open. A selected id that
+  // disappears must block Save rather than be omitted from a clear:true PATCH.
+  const missingSelection = selectedEntries.length !== selected.length;
   // A selected row whose items may not be republished (e.g. a formerly
-  // featured AniList list that is now all-private) blocks Save; the row's
+  // featured AniList list that is now all-private) also blocks Save; its
   // remove button is the explicit way to drop it from the profile.
   const blocked = useMemo(
     () => hasUnprovenSelection(entries, selected, privacy),
@@ -372,11 +375,17 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
               )}
             </>
           )}
-          {blocked && (
-            <div className="space-y-1 text-[13px] text-danger">
-              <p>{t("Some lists can no longer be featured. Remove them to save.")}</p>
-              <p>{t("Removing a list not in your library deletes it from your profile.")}</p>
-            </div>
+          {missingSelection ? (
+            <p className="text-[13px] text-danger">
+              {t("Lists changed while this picker was open. Reopen it before saving.")}
+            </p>
+          ) : (
+            blocked && (
+              <div className="space-y-1 text-[13px] text-danger">
+                <p>{t("Some lists can no longer be featured. Remove them to save.")}</p>
+                <p>{t("Removing a list not in your library deletes it from your profile.")}</p>
+              </div>
+            )
           )}
           {overLimit && (
             <p className="text-[13px] text-danger">

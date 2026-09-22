@@ -264,6 +264,8 @@ const profileFill: Record<string, string> = {
     "Algumas listas não podem mais ser destacadas. Remova-as para salvar.",
   "Removing a list not in your library deletes it from your profile.":
     "Remover uma lista que não está na sua biblioteca a exclui do seu perfil.",
+  "Lists changed while this picker was open. Reopen it before saving.":
+    "As listas mudaram enquanto este seletor estava aberto. Reabra-o antes de salvar.",
   "Could not verify AniList lists. Reopen this picker to try again.":
     "Não foi possível verificar as listas do AniList. Reabra este seletor para tentar novamente.",
   "1 friend in common": "1 amigo em comum",
