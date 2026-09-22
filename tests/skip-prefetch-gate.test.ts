@@ -154,3 +154,14 @@ test("no file outside the four call sites invokes prefetchSegments", () => {
     .filter((rel: string) => readFileSync(new URL(rel, root), "utf8").match(PREFETCH_CALL));
   assert.deepEqual([...callers].sort(), [...PREFETCH_CALL_SITES].sort());
 });
+
+// src-contract: prefetchSegments must forward its enabled flag into
+// prefetchSkipSegments. A hardcoded `true` here would bypass the whole gate
+// after every view-level check above still passes, re-triggering the popup.
+test("prefetchSegments forwards its enabled flag to prefetchSkipSegments", () => {
+  const source = readFileSync(
+    new URL("../src/lib/skip-intro/index.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /prefetchSkipSegments\(\s*enabled\s*,\s*\{/);
+});
