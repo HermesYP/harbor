@@ -20,7 +20,12 @@ function media(id: number, idMal: number | null, format: string | null = "TV") {
   return {
     id,
     idMal,
-    title: { romaji: `Romaji ${id}`, english: `English ${id}`, native: null, userPreferred: `UP ${id}` },
+    title: {
+      romaji: `Romaji ${id}`,
+      english: `English ${id}`,
+      native: null,
+      userPreferred: `UP ${id}`,
+    },
     coverImage: { extraLarge: `https://img.test/${id}.jpg`, large: null, medium: null },
     bannerImage: null,
     format,
@@ -54,7 +59,11 @@ test("mapping: status lists get readable fallback names and map entries to featu
 
 test("mapping: custom lists use their AniList name and movies map to movie type", () => {
   const lists = buildProfileLists([
-    group({ name: "  Best OVAs  ", isCustomList: true, entries: [entry(1, media(20, null, "MOVIE"))] }),
+    group({
+      name: "  Best OVAs  ",
+      isCustomList: true,
+      entries: [entry(1, media(20, null, "MOVIE"))],
+    }),
   ]);
   assert.equal(lists.length, 1);
   assert.equal(lists[0].name, "Best OVAs");
@@ -110,7 +119,9 @@ test("cache: stored lists round-trip per AniList user and corrupted payloads are
 
 test("account-switch: one account's cached lists are never served to another", () => {
   resetProfileLists();
-  const mine = buildProfileLists([group({ name: "Mine", isCustomList: true, entries: [entry(1, media(60))] })]);
+  const mine = buildProfileLists([
+    group({ name: "Mine", isCustomList: true, entries: [entry(1, media(60))] }),
+  ]);
   writeCachedProfileLists(111, mine);
   assert.equal(readCachedProfileLists(222), null);
   // clearing the memory layer must not move data between accounts either
@@ -126,7 +137,10 @@ test("account-switch: lists.ts fetches with the shared query, caches per user, a
   assert.match(src, /writeCachedProfileLists\(userId, lists\);/);
   assert.match(src, /resetProfileLists\(\);/);
   // 401 triggers a session revalidation instead of surfacing a raw failure
-  assert.match(src, /e instanceof AnilistApiError && e\.status === 401\) void validateAnilistSession\(\)/);
+  assert.match(
+    src,
+    /e instanceof AnilistApiError && e\.status === 401\) void validateAnilistSession\(\)/,
+  );
 
   const bridge = readFileSync(
     new URL("../src/lib/tracker-profile-bridge.tsx", import.meta.url),

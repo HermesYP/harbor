@@ -76,7 +76,12 @@ function ListRow({
       <div className="flex shrink-0 gap-1">
         {list.items.slice(0, 4).map((item) => (
           <div key={item.id} className="w-8">
-            <Poster src={item.poster || undefined} seed={item.name || item.id} ratio="portrait" className="rounded-[6px]" />
+            <Poster
+              src={item.poster || undefined}
+              seed={item.name || item.id}
+              ratio="portrait"
+              className="rounded-[6px]"
+            />
           </div>
         ))}
       </div>
@@ -122,7 +127,9 @@ function SelectedRow({
           <ChevronDown size={16} strokeWidth={2.5} />
         </button>
       </div>
-      <span className="w-4 shrink-0 text-center text-[13px] font-semibold tabular-nums text-ink-subtle">{index + 1}</span>
+      <span className="w-4 shrink-0 text-center text-[13px] font-semibold tabular-nums text-ink-subtle">
+        {index + 1}
+      </span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[14px] font-medium text-ink">{list.name}</div>
         <div className="text-[12px] text-ink-subtle">
@@ -133,7 +140,12 @@ function SelectedRow({
       <div className="flex shrink-0 gap-1">
         {list.items.slice(0, 3).map((item) => (
           <div key={item.id} className="w-8">
-            <Poster src={item.poster || undefined} seed={item.name || item.id} ratio="portrait" className="rounded-[6px]" />
+            <Poster
+              src={item.poster || undefined}
+              seed={item.name || item.id}
+              ratio="portrait"
+              className="rounded-[6px]"
+            />
           </div>
         ))}
       </div>
@@ -152,14 +164,11 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   const t = useT();
   const local = useCustomLists();
   const { isConnected: anilistConnected, session: anilistSession } = useAnilist();
-  const anilistUserId = anilistConnected ? anilistSession?.userId ?? null : null;
+  const anilistUserId = anilistConnected ? (anilistSession?.userId ?? null) : null;
   const [anilist, setAnilist] = useState<PickableList[]>(() =>
-    anilistUserId != null ? readCachedProfileLists(anilistUserId) ?? [] : [],
+    anilistUserId != null ? (readCachedProfileLists(anilistUserId) ?? []) : [],
   );
-  const lists = useMemo(
-    () => [...local.map(toPickableList), ...anilist],
-    [local, anilist],
-  );
+  const lists = useMemo(() => [...local.map(toPickableList), ...anilist], [local, anilist]);
   const [selected, setSelected] = useState<string[]>([]);
   const [served, setServed] = useState<FeaturedList[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -175,10 +184,14 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   const entries = useMemo(() => [...lists, ...ghosts], [lists, ghosts]);
   const ghostIds = useMemo(() => new Set(ghosts.map((g) => g.id)), [ghosts]);
   const selectedEntries = useMemo(
-    () => selected.map((id) => entries.find((e) => e.id === id)).filter((l): l is PickableList => !!l),
+    () =>
+      selected.map((id) => entries.find((e) => e.id === id)).filter((l): l is PickableList => !!l),
     [selected, entries],
   );
-  const unselectedEntries = useMemo(() => entries.filter((e) => !selected.includes(e.id)), [entries, selected]);
+  const unselectedEntries = useMemo(
+    () => entries.filter((e) => !selected.includes(e.id)),
+    [entries, selected],
+  );
 
   useEffect(() => {
     const handle = currentAuthor()?.handle;
@@ -240,9 +253,7 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
     setError(null);
     try {
       const byId = new Map(entries.map((l) => [l.id, l] as const));
-      const picked = selected
-        .map((id) => byId.get(id))
-        .filter((l): l is PickableList => !!l);
+      const picked = selected.map((id) => byId.get(id)).filter((l): l is PickableList => !!l);
       await saveFeaturedLists(buildFeaturedPayload(picked, served), true);
       onClose?.();
     } catch {
@@ -253,7 +264,11 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[140] flex items-center justify-center p-4" role="dialog" aria-modal>
+    <div
+      className="fixed inset-0 z-[140] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal
+    >
       <button aria-label={t("Close")} className="absolute inset-0 bg-black/55" onClick={onClose} />
       <div className="relative flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-[20px] bg-surface ring-1 ring-edge">
         <div className="flex items-center justify-between border-b border-edge-soft px-6 py-4">
@@ -269,19 +284,25 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
 
         <div className="flex-1 space-y-2 overflow-y-auto px-6 py-5">
           <p className="pb-1 text-[13px] text-ink-muted">
-            {t("Pick up to {max} lists to show on your public profile.", { max: MAX_FEATURED_LISTS })}
+            {t("Pick up to {max} lists to show on your public profile.", {
+              max: MAX_FEATURED_LISTS,
+            })}
           </p>
           {entries.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-[10px] border border-dashed border-edge py-12 text-center">
               <ListVideo size={24} className="text-ink-subtle" />
               <p className="mt-2 text-[14px] text-ink-muted">{t("You have no lists yet")}</p>
-              <p className="mt-1 text-[12px] text-ink-subtle">{t("Create lists in your library to feature them here")}</p>
+              <p className="mt-1 text-[12px] text-ink-subtle">
+                {t("Create lists in your library to feature them here")}
+              </p>
             </div>
           ) : (
             <>
               {selectedEntries.length > 0 && (
                 <div className="space-y-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">{t("Featured order")}</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
+                    {t("Featured order")}
+                  </div>
                   {selectedEntries.map((list, i) => (
                     <SelectedRow
                       key={list.id}
@@ -299,7 +320,9 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
               {unselectedEntries.length > 0 && (
                 <div className="space-y-2 pt-1">
                   {selectedEntries.length > 0 && (
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">{t("Add a list")}</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
+                      {t("Add a list")}
+                    </div>
                   )}
                   {unselectedEntries.map((list) => (
                     <ListRow

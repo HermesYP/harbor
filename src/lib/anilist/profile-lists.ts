@@ -59,10 +59,12 @@ const STATUS_LIST_LABELS: Record<MediaListStatus, string> = {
 };
 
 function slug(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "list";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "list"
+  );
 }
 
 function groupName(group: ProfileListGroup): string {
