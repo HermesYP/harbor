@@ -4,9 +4,11 @@
 //   { infoHash: H, url: "https://streaming.strem.io/H/2" }
 // without a fileIdx must keep the index the addon URL names: addon parsing
 // inherits it (so completed-download/debrid paths share it too), and the local
-// engine must not guess episode/largest when the URL still carries it. A URL
-// whose hash mismatches, or whose index is missing/-1/unsafe, is never trusted
-// and falls back to the previous guess behavior.
+// engine must not guess episode/largest when the URL still carries it. Only
+// hosted torrent-server URLs follow the /<hash>/<idx> contract — arbitrary
+// URLs (proxy links etc.), hash mismatches, invalid indexes, and indexes the
+// engine's file list does not actually contain are never trusted and fall
+// back to the previous guess behavior.
 // @ts-expect-error Node test types are intentionally outside the browser-only tsconfig.
 import assert from "node:assert/strict";
 // @ts-expect-error Node test types are intentionally outside the browser-only tsconfig.
@@ -57,10 +59,25 @@ const ENGINE_FILES = [
   { idx: 2, name: "Show.S01E03.mkv", length: 1_800_000_000 },
 ];
 const GUESSED_IDX = 1;
+const PROXY_URL = "https://api.addon.example/proxy";
+
+// Sparse idx list: 7 files where idx 5 does not exist. A naive
+// `idx < files.length` check would wrongly accept 5; membership by idx must not.
+const SPARSE_ENGINE_FILES = [
+  { idx: 0, name: "Show.S01E01.mkv", length: 1_000_000_000 },
+  { idx: 1, name: "Show.S01E02.mkv", length: 1_100_000_000 },
+  { idx: 2, name: "Show.S01E03.mkv", length: 1_200_000_000 },
+  { idx: 3, name: "Show.S01E04.mkv", length: 1_300_000_000 },
+  { idx: 4, name: "Show.S01E05.mkv", length: 1_400_000_000 },
+  { idx: 6, name: "Show.S01E07.mkv", length: 9_000_000_000 },
+  { idx: 7, name: "Show.S01E08.mkv", length: 1_500_000_000 },
+];
+const SPARSE_GUESSED_IDX = 6; // largest file when no hint matches
 
 type InvokeCall = { cmd: string; args: Record<string, unknown> };
 const calls: InvokeCall[] = [];
 let addonPayload: Array<Record<string, unknown>> = [];
+let engineFiles = ENGINE_FILES;
 
 const scope = globalThis as { window?: Record<string, unknown> };
 scope.window ??= globalThis as Record<string, unknown>;
@@ -70,7 +87,7 @@ scope.window.__TAURI_INTERNALS__ = {
     if (cmd === "torrent_engine_add") {
       return {
         info_hash: HASH,
-        files: ENGINE_FILES,
+        files: engineFiles,
         stream_base: ENGINE_STREAM_BASE,
         already_managed: true,
       };
@@ -110,6 +127,7 @@ function setSettings(value: Record<string, unknown> | null): void {
 
 function reset(): void {
   calls.length = 0;
+  engineFiles = ENGINE_FILES;
   setSettings(null);
 }
 
@@ -241,6 +259,28 @@ test("the legacy uncached derivation still fills hash and index together", async
   assert.equal(streams[0].fileIdx, 3, "the derived hash still carries its URL index");
 });
 
+test("addon parsing never inherits an index from a non-hosted URL", async () => {
+  reset();
+  const streams = await fetchMapped([
+    { infoHash: HASH, url: `${PROXY_URL}/${HASH}/2`, name: "Proxy" },
+  ]);
+  assert.equal(streams[0].infoHash, HASH, "the addon's own hash is unaffected");
+  assert.equal(
+    streams[0].fileIdx,
+    undefined,
+    "a proxy URL's /<hash>/<idx> path is not the torrent-server contract (P1)",
+  );
+});
+
+test("legacy uncached hash derivation keeps the hash but not a non-hosted URL's index", async () => {
+  reset();
+  const streams = await fetchMapped([
+    { url: `${PROXY_URL}/${HASH}/3`, name: "⚠ uncached" },
+  ]);
+  assert.equal(streams[0].infoHash, HASH, "the legacy hash derivation is preserved");
+  assert.equal(streams[0].fileIdx, undefined, "but a non-hosted URL must not donate its index");
+});
+
 test("a missing fileIdx inherits the hosted URL's index instead of the largest-file guess", async () => {
   reset();
   const r = await resolveHosted(hostedStream());
@@ -300,4 +340,112 @@ test("an invalid URL index (-1) falls back to the guess instead of garbage", asy
   if (r.ok) assert.equal(r.data.url, `${ENGINE_STREAM_BASE}/${HASH}/${GUESSED_IDX}`);
   assert.equal(invokeArgs("torrent_engine_add")?.fileIdx, null);
   assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, GUESSED_IDX);
+});
+
+test("a non-hosted URL never picks the file: the episode hint wins (P1)", async () => {
+  reset();
+  // forceP2p sends any infoHash stream through the engine regardless of URL
+  // class, so this exercises the resolve-level inheritance gate directly.
+  const r = await resolveStream(
+    hostedStream({ url: `${PROXY_URL}/${HASH}/2` }) as never,
+    [],
+    new AbortController().signal,
+    true,
+    true,
+    { season: 1, episode: 2 },
+    true,
+    true,
+  );
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.via, "p2p");
+    assert.equal(
+      r.data.url,
+      `${ENGINE_STREAM_BASE}/${HASH}/1`,
+      "the hint (S01E02 → idx 1), not the proxy URL's trailing /2, must choose the file",
+    );
+  }
+  assert.equal(
+    invokeArgs("torrent_engine_add")?.fileIdx,
+    null,
+    "a non-hosted URL must not donate an index",
+  );
+  assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, 1, "episode hint match expected");
+});
+
+test("a hosted URL index the torrent does not contain falls back to the guess (P2)", async () => {
+  reset();
+  const r = await resolveHosted(hostedStream({ url: `https://streaming.strem.io/${HASH}/4` }));
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.via, "p2p");
+    assert.equal(
+      r.data.url,
+      `${ENGINE_STREAM_BASE}/${HASH}/${GUESSED_IDX}`,
+      "idx 4 does not exist in a 3-file torrent; the guess must win",
+    );
+  }
+  assert.equal(invokeArgs("torrent_engine_add")?.fileIdx, 4, "the intended index is still passed");
+  assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, GUESSED_IDX);
+});
+
+test("file existence is checked by idx membership, not by file count (sparse idx)", async () => {
+  reset();
+  engineFiles = SPARSE_ENGINE_FILES;
+  // idx 5 is absent while files.length is 7, so `5 < files.length` would pass
+  // a naive bound check — only membership by idx rejects it.
+  const r = await resolveHosted(hostedStream({ url: `https://streaming.strem.io/${HASH}/5` }));
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.via, "p2p");
+    assert.equal(r.data.url, `${ENGINE_STREAM_BASE}/${HASH}/${SPARSE_GUESSED_IDX}`);
+  }
+  assert.equal(invokeArgs("torrent_engine_add")?.fileIdx, 5);
+  assert.equal(
+    invokeArgs("torrent_engine_select")?.fileIdx,
+    SPARSE_GUESSED_IDX,
+    "a missing sparse idx must fall back to the guess, not be selected",
+  );
+
+  // A sparse idx that does exist must still be selectable.
+  calls.length = 0;
+  const ok = await resolveHosted(hostedStream({ url: `https://streaming.strem.io/${HASH}/7` }));
+  assert.equal(ok.ok, true);
+  if (ok.ok) assert.equal(ok.data.url, `${ENGINE_STREAM_BASE}/${HASH}/7`);
+  assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, 7);
+});
+
+test("parsing → resolve end to end: an inherited out-of-range idx still guesses (P2)", async () => {
+  reset();
+  // The hole parse-time normalization creates: fetchOne maps the hosted URL's
+  // idx 4 into stream.fileIdx, so resolve must not mistake it for an explicit
+  // addon-provided fileIdx and select a file this 3-file torrent does not have.
+  const [mapped] = await fetchMapped([
+    { infoHash: HASH, url: `https://streaming.strem.io/${HASH}/4`, name: "Show S01E04" },
+  ]);
+  assert.equal(mapped.fileIdx, 4, "parsing inherits the hosted index");
+  const r = await resolveHosted(mapped as unknown as Record<string, unknown>);
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.via, "p2p");
+    assert.equal(
+      r.data.url,
+      `${ENGINE_STREAM_BASE}/${HASH}/${GUESSED_IDX}`,
+      "idx 4 does not exist; the mapped index must still be verified against the file list",
+    );
+    assert.equal(r.data.fileIdx, GUESSED_IDX);
+  }
+  assert.equal(invokeArgs("torrent_engine_add")?.fileIdx, 4, "the intended index is still passed");
+  assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, GUESSED_IDX);
+
+  // In range, the mapped index is honored end to end.
+  calls.length = 0;
+  const [mappedInRange] = await fetchMapped([
+    { infoHash: HASH, url: `https://streaming.strem.io/${HASH}/2`, name: "Show S01E03" },
+  ]);
+  assert.equal(mappedInRange.fileIdx, 2);
+  const ok = await resolveHosted(mappedInRange as unknown as Record<string, unknown>);
+  assert.equal(ok.ok, true);
+  if (ok.ok) assert.equal(ok.data.url, `${ENGINE_STREAM_BASE}/${HASH}/2`);
+  assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, 2);
 });

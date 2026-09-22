@@ -5,6 +5,7 @@ import { isAddonRanked, isStatusOnlyAddon } from "./addon-detect";
 import type { AddonRankFn } from "./addon-priority";
 import { hasUncachedMarker } from "./cached";
 import { fileIdxFromUrlForHash, infoHashFromSources, infoHashFromUrl } from "@/lib/torrent/magnet";
+import { isHostedTorrentServerUrl } from "@/lib/torrent/stremio-stream";
 import type { Stream } from "./types";
 
 const TIMEOUT_MS_FAST = 8000;
@@ -321,10 +322,12 @@ async function fetchOne(
           if (hash) mapped.infoHash = hash;
         }
         // The addon may already know the infoHash while a hosted torrent-server
-        // url still names the intended file. Inherit that index only when the
-        // url's hash matches the stream's own hash; never override an explicit
-        // fileIdx, and never trust a foreign hash or a malformed index.
-        if (mapped.fileIdx == null && mapped.infoHash) {
+        // url still names the intended file. Only such urls follow the
+        // /<hash>/<idx> contract — an arbitrary url (e.g. /proxy/<hash>/2) may
+        // carry unrelated path segments. Inherit the index only when the url's
+        // hash matches the stream's own hash; never override an explicit
+        // fileIdx, and never trust a malformed index.
+        if (mapped.fileIdx == null && mapped.infoHash && isHostedTorrentServerUrl(s.url)) {
           const urlIdx = fileIdxFromUrlForHash(s.url, mapped.infoHash);
           if (urlIdx != null) mapped.fileIdx = urlIdx;
         }

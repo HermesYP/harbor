@@ -343,16 +343,28 @@ async function tryLocalEngine(
 ): Promise<DirectLink | null> {
   if (!stream.infoHash || !localTorrentAllowed() || signal.aborted) return null;
   // Streams parsed from addons normally carry fileIdx already, but a hosted
-  // torrent-server url can still name the intended file when it went missing.
-  // Inherit it only for the same hash: an explicit fileIdx always wins, and a
-  // foreign hash or malformed index falls back to the episode/largest guess.
+  // torrent-server url can still name the intended file when it went missing —
+  // and addon parsing may have already copied that URL's index into fileIdx.
+  // Treat any index the hosted URL backs as URL-derived and verify it against
+  // the engine's actual file list before selecting: only such urls follow the
+  // /<hash>/<idx> contract, and only the engine knows which idxes exist. An
+  // explicit fileIdx that differs from the hosted URL (or has no trustworthy
+  // URL) is the addon's own choice and keeps its pre-existing semantics: the
+  // engine may decline it rather than silently guess another file. A foreign
+  // hash, malformed index, or URL-backed index absent from the file list falls
+  // back to the episode/largest guess.
   const ownIdx =
     typeof stream.fileIdx === "number" &&
     Number.isSafeInteger(stream.fileIdx) &&
     stream.fileIdx >= 0
       ? stream.fileIdx
       : undefined;
-  const intendedIdx = ownIdx ?? fileIdxFromUrlForHash(stream.url, stream.infoHash);
+  const urlIdx = isHostedTorrentServerUrl(stream.url)
+    ? fileIdxFromUrlForHash(stream.url, stream.infoHash)
+    : undefined;
+  const urlBackedIdx =
+    urlIdx != null && (ownIdx == null || ownIdx === urlIdx) ? urlIdx : undefined;
+  const intendedIdx = ownIdx ?? urlIdx;
   const added = await torrentEngineAdd(
     magnetFromHash(stream.infoHash),
     trackersFromSources(stream.sources),
@@ -364,7 +376,13 @@ async function tryLocalEngine(
   try {
     if (added.files.length === 0 || signal.aborted) return null;
     const filename = stream.behaviorHints?.filename ?? stream.behaviorHints?.fileName ?? null;
-    let chosenIdx = intendedIdx;
+    let chosenIdx: number | undefined;
+    if (urlBackedIdx != null) {
+      const backIdx = urlBackedIdx;
+      chosenIdx = added.files.some((f) => f.idx === backIdx) ? backIdx : undefined;
+    } else {
+      chosenIdx = ownIdx;
+    }
     if (chosenIdx == null) {
       const season = hint?.season ?? stream.season;
       const episode = hint?.episode ?? stream.episode;
