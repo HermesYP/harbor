@@ -1,6 +1,15 @@
 import { AnilistApiError, anilistRequest } from "./client";
+import {
+  PROFILE_LISTS_QUERY,
+  buildProfileLists,
+  readCachedProfileLists,
+  resetProfileLists,
+  writeCachedProfileLists,
+  type ProfileListGroup,
+} from "./profile-lists";
 import type { AnilistListGroup, AnilistMediaEntry, MediaListStatus } from "./types";
 import { validateAnilistSession } from "./validate";
+import type { PickableList } from "@/lib/social/featured-lists";
 
 const COLLECTION_QUERY = `query ($userId: Int) {
   MediaListCollection(userId: $userId, type: ANIME) {
@@ -43,6 +52,8 @@ const inflight = new Map<number, Promise<AnilistListGroup[]>>();
 export function resetForProfile() {
   memCache.clear();
   inflight.clear();
+  resetProfileLists();
+  profileListsInflight.clear();
 }
 
 function cacheKey(userId: number): string {
@@ -108,5 +119,39 @@ export async function fetchMediaListCollection(userId: number): Promise<AnilistL
     return await run;
   } finally {
     inflight.delete(userId);
+  }
+}
+
+type ProfileListsResponse = { MediaListCollection: { lists: ProfileListGroup[] } | null };
+
+const profileListsInflight = new Map<number, Promise<PickableList[]>>();
+
+/**
+ * Loads the connected owner's AniList lists as profile-featured candidates.
+ * Falls back to the per-user cache when AniList is unreachable; never leaks
+ * across accounts because the cache and inflight keys are per AniList userId.
+ */
+export async function fetchProfileLists(userId: number): Promise<PickableList[]> {
+  const existing = profileListsInflight.get(userId);
+  if (existing) return existing;
+  const run = (async () => {
+    const data = await anilistRequest<ProfileListsResponse>(PROFILE_LISTS_QUERY, { userId }).catch(
+      (e) => {
+        if (e instanceof AnilistApiError && e.status === 401) void validateAnilistSession();
+        return null;
+      },
+    );
+    if (data == null) {
+      return readCachedProfileLists(userId) ?? [];
+    }
+    const lists = buildProfileLists(data.MediaListCollection?.lists ?? []);
+    writeCachedProfileLists(userId, lists);
+    return lists;
+  })();
+  profileListsInflight.set(userId, run);
+  try {
+    return await run;
+  } finally {
+    profileListsInflight.delete(userId);
   }
 }

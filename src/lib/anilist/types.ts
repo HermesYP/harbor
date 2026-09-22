@@ -47,6 +47,8 @@ export type AnilistMediaEntry = {
   status: MediaListStatus;
   progress: number;
   score: number;
+  /** AniList per-entry privacy flag; only ever true for the authenticated owner's own rows. */
+  private?: boolean;
   media: AnilistMedia;
 };
 

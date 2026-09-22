@@ -2,6 +2,9 @@ import { Check, ChevronDown, ChevronUp, ListVideo, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Poster } from "@/components/poster";
 import { useCustomLists } from "@/lib/custom-lists";
+import { fetchProfileLists } from "@/lib/anilist/lists";
+import { readCachedProfileLists } from "@/lib/anilist/profile-lists";
+import { useAnilist } from "@/lib/anilist/provider";
 import { useT } from "@/lib/i18n";
 import { currentAuthor } from "@/lib/theme-auth";
 import {
@@ -148,7 +151,15 @@ function SelectedRow({
 export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   const t = useT();
   const local = useCustomLists();
-  const lists = useMemo(() => local.map(toPickableList), [local]);
+  const { isConnected: anilistConnected, session: anilistSession } = useAnilist();
+  const anilistUserId = anilistConnected ? anilistSession?.userId ?? null : null;
+  const [anilist, setAnilist] = useState<PickableList[]>(() =>
+    anilistUserId != null ? readCachedProfileLists(anilistUserId) ?? [] : [],
+  );
+  const lists = useMemo(
+    () => [...local.map(toPickableList), ...anilist],
+    [local, anilist],
+  );
   const [selected, setSelected] = useState<string[]>([]);
   const [served, setServed] = useState<FeaturedList[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -173,19 +184,28 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
     const handle = currentAuthor()?.handle;
     if (!handle) return;
     const ctrl = new AbortController();
-    fetchFeaturedLists(handle, ctrl.signal)
-      .then((featured) => {
+    const anilistReady =
+      anilistUserId != null
+        ? fetchProfileLists(anilistUserId).catch(() => [])
+        : Promise.resolve([]);
+    Promise.all([fetchFeaturedLists(handle, ctrl.signal), anilistReady])
+      .then(([featured, anilistLists]) => {
+        if (ctrl.signal.aborted) return;
         setServed(featured);
+        setAnilist(anilistLists);
         const localPick = readLocalLists();
-        const localNames = new Set(localPick.map((l) => normName(l.name)));
-        const matched = matchSelection(featured, localPick);
-        const gIds = featured.filter((f) => !localNames.has(normName(f.name))).map((f) => "srv:" + f.id);
+        const pickable = [...localPick, ...anilistLists];
+        const localNames = new Set(pickable.map((l) => normName(l.name)));
+        const matched = matchSelection(featured, pickable);
+        const gIds = featured
+          .filter((f) => !localNames.has(normName(f.name)))
+          .map((f) => "srv:" + f.id);
         setSelected([...matched, ...gIds]);
         setLoaded(true);
       })
       .catch(() => {});
     return () => ctrl.abort();
-  }, []);
+  }, [anilistUserId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
