@@ -362,12 +362,21 @@ async function tryLocalEngine(
   const urlIdx = isHostedTorrentServerUrl(stream.url)
     ? fileIdxFromUrlForHash(stream.url, stream.infoHash)
     : undefined;
-  const urlBackedIdx = urlIdx != null && (ownIdx == null || ownIdx === urlIdx) ? urlIdx : undefined;
-  const intendedIdx = ownIdx ?? urlIdx;
+  const urlBackedIdx =
+    urlIdx != null && (ownIdx == null || ownIdx === urlIdx) ? urlIdx : undefined;
+  // librqbit validates AddTorrentOptions.only_files against the metadata it
+  // fetches inside add_torrent and fails the WHOLE add on an out-of-range id
+  // (librqbit 8.1.1 session.rs: "file id N is out of range"), so a URL-backed
+  // index that has not met the engine's file list must not narrow the add —
+  // it would abort before the membership fallback below can ever run. Only a
+  // genuinely explicit fileIdx narrows at add time (unchanged semantics); the
+  // URL-backed index is verified and applied via torrent_engine_select once
+  // the metadata — and therefore the real file list — exists.
+  const addIdx = urlBackedIdx != null ? undefined : ownIdx;
   const added = await torrentEngineAdd(
     magnetFromHash(stream.infoHash),
     trackersFromSources(stream.sources),
-    intendedIdx,
+    addIdx,
   );
   if (!added) return null;
   const releaseAbortCleanup = registerAbortCleanup(added, signal);

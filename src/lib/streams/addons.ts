@@ -375,6 +375,37 @@ function dedupeStreams(streams: Stream[]): Stream[] {
       const merged = new Set([...(prior.sources ?? []), ...s.sources]);
       prior.sources = [...merged];
     }
+    // URL-index normalization can map two representations of the same
+    // torrent+file onto one key (an explicit fileIdx and a hosted-URL-derived
+    // one). Keep the first stream as primary — its identity and transport URL
+    // decide how the stream is scored and played — but carry over facts the
+    // duplicate has and the primary lacks instead of dropping them: a URL only
+    // when the primary has none (never swapping transports), positive cached
+    // flags (true wins, so the merge is independent of response order), and
+    // behaviorHints keys the primary is missing.
+    if (prior.url == null && s.url != null) prior.url = s.url;
+    const priorCached = (prior as { cached?: Partial<Record<string, boolean>> }).cached;
+    const dupCached = (s as { cached?: Partial<Record<string, boolean>> }).cached;
+    if (dupCached) {
+      let mergedCached: Partial<Record<string, boolean>> | undefined;
+      for (const [slug, v] of Object.entries(dupCached)) {
+        if (v === true && priorCached?.[slug] !== true) {
+          (mergedCached ??= { ...priorCached })[slug] = true;
+        }
+      }
+      if (mergedCached) (prior as { cached?: Partial<Record<string, boolean>> }).cached = mergedCached;
+    }
+    if (s.behaviorHints) {
+      const hints: NonNullable<Stream["behaviorHints"]> = { ...prior.behaviorHints };
+      let filled = false;
+      for (const [k, v] of Object.entries(s.behaviorHints)) {
+        if (v !== undefined && hints[k] === undefined) {
+          hints[k] = v;
+          filled = true;
+        }
+      }
+      if (filled) prior.behaviorHints = hints;
+    }
   }
   return [...seen.values()];
 }

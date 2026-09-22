@@ -85,6 +85,12 @@ scope.window.__TAURI_INTERNALS__ = {
   invoke: async (cmd: string, args: Record<string, unknown>) => {
     calls.push({ cmd, args });
     if (cmd === "torrent_engine_add") {
+      const idx = args.fileIdx;
+      if (typeof idx === "number" && !engineFiles.some((f) => f.idx === idx)) {
+        // Mirrors librqbit 8.1.1 compute_only_files (session.rs): out-of-range
+        // only_files fails the ENTIRE add once metadata is known.
+        throw new Error(`file id ${idx} is out of range`);
+      }
       return {
         info_hash: HASH,
         files: engineFiles,
@@ -294,8 +300,8 @@ test("a missing fileIdx inherits the hosted URL's index instead of the largest-f
   }
   assert.equal(
     invokeArgs("torrent_engine_add")?.fileIdx,
-    2,
-    "the engine must be told the intended file up front",
+    null,
+    "the URL-derived index must not narrow the add (librqbit fails an out-of-range one)",
   );
   assert.equal(
     invokeArgs("torrent_engine_select")?.fileIdx,
@@ -383,7 +389,11 @@ test("a hosted URL index the torrent does not contain falls back to the guess (P
       "idx 4 does not exist in a 3-file torrent; the guess must win",
     );
   }
-  assert.equal(invokeArgs("torrent_engine_add")?.fileIdx, 4, "the intended index is still passed");
+  assert.equal(
+    invokeArgs("torrent_engine_add")?.fileIdx,
+    null,
+    "the unverified URL index must not narrow the add",
+  );
   assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, GUESSED_IDX);
 });
 
@@ -398,7 +408,7 @@ test("file existence is checked by idx membership, not by file count (sparse idx
     assert.equal(r.via, "p2p");
     assert.equal(r.data.url, `${ENGINE_STREAM_BASE}/${HASH}/${SPARSE_GUESSED_IDX}`);
   }
-  assert.equal(invokeArgs("torrent_engine_add")?.fileIdx, 5);
+  assert.equal(invokeArgs("torrent_engine_add")?.fileIdx, null);
   assert.equal(
     invokeArgs("torrent_engine_select")?.fileIdx,
     SPARSE_GUESSED_IDX,
@@ -433,7 +443,11 @@ test("parsing → resolve end to end: an inherited out-of-range idx still guesse
     );
     assert.equal(r.data.fileIdx, GUESSED_IDX);
   }
-  assert.equal(invokeArgs("torrent_engine_add")?.fileIdx, 4, "the intended index is still passed");
+  assert.equal(
+    invokeArgs("torrent_engine_add")?.fileIdx,
+    null,
+    "the unverified URL index must not narrow the add",
+  );
   assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, GUESSED_IDX);
 
   // In range, the mapped index is honored end to end.
@@ -446,4 +460,117 @@ test("parsing → resolve end to end: an inherited out-of-range idx still guesse
   assert.equal(ok.ok, true);
   if (ok.ok) assert.equal(ok.data.url, `${ENGINE_STREAM_BASE}/${HASH}/2`);
   assert.equal(invokeArgs("torrent_engine_select")?.fileIdx, 2);
+});
+
+test("dedupe merges normalized duplicates in either order without transport contamination (F1)", async () => {
+  reset();
+  const DEBRID_A = "https://debrid.example/d/TOKEN-A.mkv";
+  const DEBRID_B = "https://debrid.example/d/TOKEN-B.mkv";
+  const streams = await fetchMapped([
+    // Explicit fileIdx first, URL-derived duplicate second (order 1).
+    { infoHash: HASH, fileIdx: 2, url: DEBRID_A, name: "RD Ep3", cached: { rd: false } },
+    {
+      infoHash: HASH,
+      url: `https://streaming.strem.io/${HASH}/2`,
+      name: "Hosted Ep3",
+      cached: { rd: true },
+      behaviorHints: { filename: "ep3.mkv" },
+    },
+    // URL-derived first (normalized to fileIdx 1), explicit duplicate second
+    // (order 2 — the same shapes with the primary flipped).
+    {
+      infoHash: HASH,
+      url: `https://streaming.strem.io/${HASH}/1`,
+      name: "Hosted Ep2",
+      behaviorHints: { bingeGroup: "group-1" },
+    },
+    {
+      infoHash: HASH,
+      fileIdx: 1,
+      url: DEBRID_B,
+      name: "RD Ep2",
+      cached: { rd: true },
+      behaviorHints: { videoSize: 1234 },
+    },
+    // A URL-less primary gains the duplicate's hosted fallback.
+    { infoHash: HASH, fileIdx: 0, name: "Seed Ep1" },
+    {
+      infoHash: HASH,
+      url: `https://streaming.strem.io/${HASH}/0`,
+      name: "Hosted Ep1",
+      cached: { rd: true },
+    },
+  ]);
+  assert.equal(streams.length, 3, "each torrent+file must collapse to exactly one stream");
+  const byName = (n: string) => {
+    const found = streams.find((s) => s.name === n);
+    assert.ok(found, `expected survivor ${n}`);
+    return found;
+  };
+
+  const explicitPrimary = byName("RD Ep3");
+  assert.equal(explicitPrimary.url, DEBRID_A, "the primary's transport URL is preserved");
+  assert.equal(
+    (explicitPrimary as unknown as { cached?: Record<string, boolean> }).cached?.rd,
+    true,
+    "the duplicate's cached flag is carried over (order 1)",
+  );
+  assert.equal(explicitPrimary.behaviorHints?.filename, "ep3.mkv", "missing hints are filled");
+
+  const hostedPrimary = byName("Hosted Ep2");
+  assert.equal(
+    hostedPrimary.url,
+    `https://streaming.strem.io/${HASH}/1`,
+    "the debrid URL must not contaminate the hosted primary (order 2)",
+  );
+  assert.equal(
+    (hostedPrimary as unknown as { cached?: Record<string, boolean> }).cached?.rd,
+    true,
+    "the duplicate's cached flag is carried over (order 2)",
+  );
+  assert.equal(hostedPrimary.behaviorHints?.bingeGroup, "group-1", "primary hints are preserved");
+  assert.equal(hostedPrimary.behaviorHints?.videoSize, 1234, "missing hints are filled");
+
+  const urllessPrimary = byName("Seed Ep1");
+  assert.equal(
+    urllessPrimary.url,
+    `https://streaming.strem.io/${HASH}/0`,
+    "a URL-less primary inherits the duplicate's hosted URL",
+  );
+  assert.equal(
+    (urllessPrimary as unknown as { cached?: Record<string, boolean> }).cached?.rd,
+    true,
+    "cached flags survive even when the primary has no URL",
+  );
+});
+
+test("an explicit out-of-range fileIdx still fails/falls back exactly as before (F2)", async () => {
+  reset();
+  const warn = console.warn;
+  console.warn = () => {};
+  let r;
+  try {
+    // A fileIdx that differs from the hosted URL's index is the addon's own
+    // choice: it must reach torrent_engine_add unchanged (which the mock
+    // rejects like librqbit), the engine declines, and the addon URL stays
+    // playable — pre-existing semantics, not a silent guess.
+    r = await resolveHosted(hostedStream({ fileIdx: 4 }));
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.equal(r.via, "direct", "a failed add falls back to the addon URL");
+    assert.equal(r.data.url, `https://streaming.strem.io/${HASH}/2`);
+  }
+  assert.equal(
+    invokeArgs("torrent_engine_add")?.fileIdx,
+    4,
+    "an explicit fileIdx is still passed through unchanged",
+  );
+  assert.equal(
+    calls.some((c) => c.cmd === "torrent_engine_select"),
+    false,
+    "a failed add never reaches select",
+  );
 });
