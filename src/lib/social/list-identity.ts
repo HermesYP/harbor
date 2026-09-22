@@ -232,12 +232,31 @@ export function keptFeaturedAfterUnfeature(
   name: string,
   source?: ListSource,
   proofItems: Array<{ id: string }> = [],
+  knownAnilistNames: string[] = [],
+  survivingPicks: PickableList[] = [],
 ): FeaturedList[] {
   const target = normalizeListName(name);
+  if (source == null) {
+    // Historical unscoped deletion was name-based; keep that API unchanged.
+    return served.filter((record) => normalizeListName(record.name) !== target);
+  }
+  const usedIds = new Set(survivingPicks.map((pick) => pick.id));
+  let deletedId = "__deleted_featured_candidate__";
+  while (usedIds.has(deletedId)) deletedId += "!";
+  const deleted: PickableList = {
+    id: deletedId,
+    name,
+    source,
+    items: proofItems.map((item) => ({ id: item.id, name: "", poster: "", type: "" })),
+  };
+  const competitors = survivingPicks.filter((pick) => normalizeListName(pick.name) === target);
   return served.filter((record) => {
     if (normalizeListName(record.name) !== target) return true;
-    if (source == null) return false;
-    if (record.source != null) return record.source !== source;
-    return !contentProvesOrigin(record, proofItems, source);
+    // Attribute EACH row with the same claim rules as the picker, but without
+    // single-use claims: historical duplicates may both belong to this list.
+    // A surviving same-name twin or remembered AniList name keeps ambiguous
+    // rows visible instead of unfeaturing another list as collateral.
+    const claim = resolveFeaturedClaims([record], [deleted, ...competitors], knownAnilistNames)[0];
+    return claim.pickId !== deletedId;
   });
 }

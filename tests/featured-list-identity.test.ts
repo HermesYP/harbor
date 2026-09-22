@@ -251,6 +251,85 @@ test("unfeature: scoped deletion fails closed on other sources and unattributed 
   );
 });
 
+test("unfeature: deleting one same-name twin preserves the surviving list's row", () => {
+  const first = items("L1", 2);
+  const subset = [first[1]];
+  const sibling = localList("L2", "Watching", subset);
+  for (const source of [undefined, "local"] as const) {
+    const served = [
+      record("S1", "Watching", { items: first, source }),
+      record("S2", "Watching", { items: subset, source }),
+    ];
+    assert.deepEqual(
+      keptFeaturedAfterUnfeature(served, "Watching", "local", first, [], [sibling]).map(
+        (row) => row.id,
+      ),
+      ["S2"],
+      "a subset twin cannot be removed just because its items overlap the deleted list",
+    );
+  }
+  // Even if ONLY the surviving subset is featured, a deleted superset also
+  // contains those items; neither candidate can uniquely claim that row.
+  const soleSiblingRow = [record("S0", "Watching", { items: subset, source: "local" })];
+  assert.deepEqual(
+    keptFeaturedAfterUnfeature(soleSiblingRow, "Watching", "local", first, [], [sibling]).map(
+      (row) => row.id,
+    ),
+    ["S0"],
+  );
+  const identical = [
+    record("S3", "Watching", { items: first, source: "local" }),
+    record("S4", "Watching", { items: first, source: "local" }),
+  ];
+  assert.deepEqual(
+    keptFeaturedAfterUnfeature(
+      identical,
+      "Watching",
+      "local",
+      first,
+      [],
+      [localList("L2", "Watching", first)],
+    ).map((row) => row.id),
+    ["S3", "S4"],
+    "identical twins are ambiguous and require explicit picker removal",
+  );
+  assert.deepEqual(
+    keptFeaturedAfterUnfeature(identical, "Watching", "local", first).map((row) => row.id),
+    [],
+    "without a surviving twin, the same deleted list can own multiple rows",
+  );
+});
+
+test("unfeature: a remembered AniList name vetoes deletion of an unattributed tt-id row", () => {
+  const proof = items("L1", 2);
+  const served = [
+    record("S1", "Watching", { items: proof }),
+    record("S2", "Watching", { items: proof, source: "local" }),
+  ];
+  const picks = [localList("L1", "Watching", proof)];
+  assert.equal(resolveFeaturedClaims(served, picks, ["Watching"])[0].pickId, null);
+  assert.deepEqual(
+    keptFeaturedAfterUnfeature(served, "Watching", "local", proof, ["Watching"]).map(
+      (row) => row.id,
+    ),
+    ["S1"],
+    "deleting the local list may remove S2, but not the known AniList ghost S1",
+  );
+  assert.deepEqual(
+    keptFeaturedAfterUnfeature(served, "Watching", "local", proof, []).map((row) => row.id),
+    [],
+    "without remembered names, the legacy local proof still works",
+  );
+  const menu = readFileSync(
+    new URL("../src/views/library/list-detail/list-settings-menu.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(menu, /readCachedProfileListNames\(anilistSession\.userId\)/);
+  assert.match(menu, /unfeatureListByName\(list\.name, "local", list\.items, names\)/);
+  const api = readFileSync(new URL("../src/lib/social/featured-lists.ts", import.meta.url), "utf8");
+  assert.match(api, /knownAnilistNames,\s*readLocalLists\(\)/);
+});
+
 test("picker wiring: privacy reconciliation and saving share identity claims", () => {
   const picker = readFileSync(
     new URL("../src/views/profile/my-lists-picker.tsx", import.meta.url),

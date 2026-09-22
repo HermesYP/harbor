@@ -127,12 +127,22 @@ export async function unfeatureListByName(
   name: string,
   source?: ListSource,
   proofItems: Array<{ id: string }> = [],
+  knownAnilistNames: string[] = [],
 ): Promise<void> {
   const handle = currentAuthor()?.handle;
   const target = normalizeListName(name);
   if (!handle || !target) return;
   const served = await fetchFeaturedLists(handle);
-  const kept = keptFeaturedAfterUnfeature(served, name, source, proofItems);
+  // Called after the custom list is deleted: the remaining local lists are
+  // competing same-name candidates, never silently remove a surviving twin.
+  const kept = keptFeaturedAfterUnfeature(
+    served,
+    name,
+    source,
+    proofItems,
+    knownAnilistNames,
+    readLocalLists(),
+  );
   if (kept.length !== served.length) await saveFeaturedLists(kept, true, handle);
 }
 
