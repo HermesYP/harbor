@@ -2,8 +2,8 @@ import { useEffect, useRef, type RefObject } from "react";
 import type { PlayerSnapshot } from "@/lib/player/bridge";
 import { getPlaybackPosition } from "@/lib/player/playback-clock";
 import type { PlayEpisode, PlayerSrc } from "@/lib/view";
+import { createEndExitScheduler } from "./end-exit-scheduler";
 
-const POST_END_DELAY_MS = 800;
 const LIVE_RELOAD_DELAY_MS = 1000;
 const LIVE_RELOAD_WINDOW_MS = 15000;
 const LIVE_RELOAD_MAX = 5;
@@ -16,20 +16,37 @@ export function useAutoEndExit(params: {
   roomGuest: boolean;
   isLive: boolean;
   suspend: boolean;
+  holdForEndRecommendations: boolean;
   startedNearEndRef: RefObject<boolean>;
   reloadLive: () => void;
   closePlayer: () => void | Promise<void>;
 }) {
-  const { src, snap, nextEp, canChangeEpisode, roomGuest, isLive, suspend, startedNearEndRef, reloadLive, closePlayer } = params;
-  const firedForRef = useRef<string | null>(null);
+  const {
+    src,
+    snap,
+    nextEp,
+    canChangeEpisode,
+    roomGuest,
+    isLive,
+    suspend,
+    holdForEndRecommendations,
+    startedNearEndRef,
+    reloadLive,
+    closePlayer,
+  } = params;
+  // Owns the close timer across effect runs: the effect cleanup cancels a
+  // pending timer, but only a timer that actually fires marks the source as
+  // closed, so a cancelled schedule re-arms when the effect re-runs.
+  const schedulerRef = useRef(createEndExitScheduler());
   const reloadTimesRef = useRef<number[]>([]);
 
   useEffect(() => {
-    firedForRef.current = null;
+    schedulerRef.current.reset();
     reloadTimesRef.current = [];
   }, [src.url]);
 
   useEffect(() => {
+    const scheduler = schedulerRef.current;
     if (snap.durationSec <= 0) return;
     const pos = getPlaybackPosition();
     const naturalEnd = snap.status === "ended";
@@ -51,13 +68,34 @@ export function useAutoEndExit(params: {
     }
 
     if (suspend) return;
+    // Hold the post-end auto-close while the "More Like This" overlay is
+    // loading or showing; released (effect re-runs) when it settles empty.
+    if (holdForEndRecommendations) return;
     if (!isLive && startedNearEndRef.current) return;
     if ((canChangeEpisode || roomGuest) && nextEp) return;
-    if (firedForRef.current === src.url) return;
-    firedForRef.current = src.url;
-    const t = window.setTimeout(() => {
+    // A hold/suspend/next-episode gate above cancels the pending timer via
+    // this cleanup; re-running the effect below must be able to re-arm it
+    // (e.g. a natural EOF whose title-detail request settles empty after a
+    // transient loading hold), while a close that already fired never
+    // schedules again for this source.
+    const armed = scheduler.schedule(src.url, () => {
       void closePlayer();
-    }, POST_END_DELAY_MS);
-    return () => window.clearTimeout(t);
-  }, [snap.status, snap.errorCode, snap.durationSec, nextEp, canChangeEpisode, roomGuest, isLive, suspend, reloadLive, src.url, closePlayer]);
+    });
+    if (!armed) return;
+    return () => scheduler.cancel();
+  }, [
+    snap.status,
+    snap.errorCode,
+    snap.durationSec,
+    nextEp,
+    canChangeEpisode,
+    roomGuest,
+    isLive,
+    suspend,
+    holdForEndRecommendations,
+    reloadLive,
+    src.url,
+    closePlayer,
+    startedNearEndRef,
+  ]);
 }

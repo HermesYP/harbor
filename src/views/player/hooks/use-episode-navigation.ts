@@ -29,9 +29,14 @@ export function useEpisodeNavigation(params: {
 }) {
   const { src, settings, inRoom, isHost, openPicker, replacePlayerSrc } = params;
 
-  const [adjacent, setAdjacent] = useState<{ prev: PlayEpisode | null; next: PlayEpisode | null }>({
+  const [adjacent, setAdjacent] = useState<{
+    prev: PlayEpisode | null;
+    next: PlayEpisode | null;
+    currentFound: boolean;
+  }>({
     prev: null,
     next: null,
+    currentFound: false,
   });
 
   const localShowKey = isLocalUrl(src.url)
@@ -43,33 +48,46 @@ export function useEpisodeNavigation(params: {
 
   useEffect(() => {
     if (src.meta.type !== "series" || !src.episode) {
-      setAdjacent({ prev: null, next: null });
+      setAdjacent({ prev: null, next: null, currentFound: false });
       return;
     }
     let cancelled = false;
+    // Never let a previous source's "current episode found" flag confirm a
+    // finale for this one while the fresh list is still in flight.
+    setAdjacent((adj) => (adj.currentFound ? { ...adj, currentFound: false } : adj));
     const cur = { season: src.episode.season, episode: src.episode.episode };
     fetchAdjacentEpisodes(src.meta, cur, {
       tmdbKey: settings.tmdbKey,
       kitsuStreamId: src.episode.kitsuStreamId,
-    }).then((r) => {
-      if (cancelled) return;
-      if (localShowKey) {
-        const eps = localShowEpisodes(localShowKey);
-        const i = eps.findIndex((e) => e.season === cur.season && e.episode === cur.episode);
-        const localPrev = i > 0 ? eps[i - 1] : null;
-        const localNext = i >= 0 && i < eps.length - 1 ? eps[i + 1] : null;
-        setAdjacent({
-          prev:
-            r.prev ??
-            (localPrev ? { season: localPrev.season as number, episode: localPrev.episode as number } : null),
-          next:
-            r.next ??
-            (localNext ? { season: localNext.season as number, episode: localNext.episode as number } : null),
-        });
-        return;
-      }
-      setAdjacent(r);
-    });
+    })
+      .then((r) => {
+        if (cancelled) return;
+        if (localShowKey) {
+          const eps = localShowEpisodes(localShowKey);
+          const i = eps.findIndex((e) => e.season === cur.season && e.episode === cur.episode);
+          const localPrev = i > 0 ? eps[i - 1] : null;
+          const localNext = i >= 0 && i < eps.length - 1 ? eps[i + 1] : null;
+          setAdjacent({
+            prev:
+              r.prev ??
+              (localPrev
+                ? { season: localPrev.season as number, episode: localPrev.episode as number }
+                : null),
+            next:
+              r.next ??
+              (localNext
+                ? { season: localNext.season as number, episode: localNext.episode as number }
+                : null),
+            currentFound: r.currentFound || i >= 0,
+          });
+          return;
+        }
+        setAdjacent(r);
+      })
+      .catch(() => {
+        // A failed list must never count as a confirmed series finale.
+        if (!cancelled) setAdjacent((curAdj) => ({ ...curAdj, currentFound: false }));
+      });
     return () => {
       cancelled = true;
     };

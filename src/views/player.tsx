@@ -56,6 +56,8 @@ import { useClipRecorder } from "./player/hooks/use-clip-recorder";
 import { useGifRecorder } from "./player/hooks/use-gif-recorder";
 import { useSleepTimer } from "./player/hooks/use-sleep-timer";
 import { useAutoEndExit } from "./player/hooks/use-auto-end-exit";
+import { useEndRecommendations } from "./player/hooks/use-end-recommendations";
+import { EndRecommendationsLayer } from "./player/end-recommendations-layer";
 import { useQueueAdvance } from "./player/hooks/use-queue-advance";
 import { usePipMode } from "./player/hooks/use-pip-mode";
 import { usePlaybackControls } from "./player/hooks/use-playback-controls";
@@ -698,6 +700,38 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
     });
   }, [src.url, src.subtitles, src.notWebReady, src.headers]);
 
+  // Declared before the end-of-playback hooks so the recommendation overlay
+  // can hold (or release) the post-end auto-close in the same render pass.
+  const { requested: hdrStageRequested, confirmed: hdrStageActive } = useHdrStage({
+    engine,
+    embedActive,
+    hdrGamma: snap.hdrGamma,
+    playerHdrStage: settings.playerHdrStage,
+    playerHdrToSdr: settings.playerHdrToSdr,
+    onFallback: () => {
+      if (hdrFallbackNoticeShown) return;
+      hdrFallbackNoticeShown = true;
+      showSyncToast(
+        "error",
+        t("For reliable HDR on this display, switch to True HDR, separate window in Settings."),
+      );
+    },
+  });
+
+  const endRecommendations = useEndRecommendations({
+    src,
+    snap,
+    adjacent,
+    inRoom,
+    isLive: isLiveLike,
+    queueLength: queue.length,
+    sleepAtEndArmed,
+    pipMode,
+    casting: !!cast.castDevice,
+    overlayHidden: hdrStageActive,
+    tmdbKey: settings.tmdbKey ?? null,
+  });
+
   useAutoEndExit({
     src,
     snap,
@@ -706,6 +740,7 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
     roomGuest,
     isLive: isLiveLike,
     suspend: queueOrSleepArmed && !isLiveLike,
+    holdForEndRecommendations: endRecommendations.holdClose,
     startedNearEndRef,
     reloadLive,
     closePlayer,
@@ -775,22 +810,6 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
     engine,
     hdrGamma: snap.hdrGamma,
     enabled: settings.mpvTweaks?.["inverse-tone-mapping"] === "yes",
-  });
-
-  const { requested: hdrStageRequested, confirmed: hdrStageActive } = useHdrStage({
-    engine,
-    embedActive,
-    hdrGamma: snap.hdrGamma,
-    playerHdrStage: settings.playerHdrStage,
-    playerHdrToSdr: settings.playerHdrToSdr,
-    onFallback: () => {
-      if (hdrFallbackNoticeShown) return;
-      hdrFallbackNoticeShown = true;
-      showSyncToast(
-        "error",
-        t("For reliable HDR on this display, switch to True HDR, separate window in Settings."),
-      );
-    },
   });
 
   const { mpvEmbedWindowsActive, stageBg } = embedFlags(
@@ -1030,6 +1049,12 @@ export function PlayerView({ src }: { src: PlayerSrc }) {
         }}
       />
       {!hdrStageActive && <PlayerOverlayLayers {...overlayProps} />}
+      <EndRecommendationsLayer
+        visible={endRecommendations.visible}
+        items={endRecommendations.items}
+        finishedTitle={src.meta.name ?? src.title}
+        onDismiss={() => void closePlayer()}
+      />
       {sourceError && (
         <SourceErrorCard
           error={sourceError}
