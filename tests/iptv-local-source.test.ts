@@ -12,7 +12,9 @@ import {
 } from "../src/lib/iptv/local-file.ts";
 import { detectProviderShape } from "../src/lib/iptv/ingest/detect.ts";
 import { deriveEpgUrls, parseM3u } from "../src/lib/iptv/m3u.ts";
+import { doFetchWithFallback } from "../src/lib/iptv/epg-store.ts";
 import {
+  epgSourceLabel,
   fetchAndParseXmltv,
   indexProgramsByChannel,
   localFileLogLabel,
@@ -240,6 +242,114 @@ test("local XMLTV logs redact the directory but keep the file name and counts", 
   assert.equal(unc, "file://…/guide.xml");
   // Unresolvable file:// forms leak nothing either.
   assert.equal(localFileLogLabel("file://nas/guide.xml"), "file://…");
+  assert.equal(localFileLogLabel("https://example.com/guide.xml"), "file://…");
+});
+
+test("local XMLTV success logs the redacted source before and after parse", async () => {
+  const xml = [
+    "<tv>",
+    '<channel id="c1"><display-name>Chan One</display-name></channel>',
+    '<programme channel="c1" start="20260101120000 +0000" stop="20260101130000 +0000">',
+    "<title>News</title></programme>",
+    "</tv>",
+  ].join("");
+  const io = fakeIo({ "C:/Users/Secret/Guide Dir/guide.xml": xml });
+
+  const logs: string[] = [];
+  const originalInfo = console.info;
+  console.info = (...args: unknown[]): void => {
+    logs.push(args.map(String).join(" "));
+  };
+  let out: Awaited<ReturnType<typeof fetchAndParseXmltv>>;
+  try {
+    out = await fetchAndParseXmltv("file:///C:/Users/Secret/Guide%20Dir/guide.xml", undefined, io);
+  } finally {
+    console.info = originalInfo;
+  }
+
+  assert.equal(out.programs.length, 1);
+  // Both local info logs keep their diagnostics (counts) with only the file
+  // name — no drive, directory, or user folder in either line.
+  assert.deepEqual(logs, [
+    "[epg] read local file file://…/guide.xml",
+    "[epg] parsed 1 programs, 1 channel defs (local file) from file://…/guide.xml",
+  ]);
+});
+
+test("local XMLTV read failures never surface the absolute path", async () => {
+  const io = fakeIo({});
+  io.stat = async () => {
+    // Nested OS errors echo the path with backslashes and may sit on `cause`.
+    const nested = new Error(
+      "ENOENT: no such file or directory, open 'C:\\Users\\Secret\\guide.xml'",
+    );
+    const wrapped = new Error("stat failed");
+    wrapped.cause = nested;
+    throw wrapped;
+  };
+
+  await assert.rejects(
+    fetchAndParseXmltv("file:///C:/Users/Secret/guide.xml", undefined, io),
+    (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      assert.ok(!message.includes("Secret"), message);
+      assert.ok(!message.includes("C:\\Users"), message);
+      assert.ok(!message.includes("C:/Users"), message);
+      // The reason survives: which step failed and the nested ENOENT code.
+      assert.match(message, /file:\/\/…\/guide\.xml/);
+      assert.match(message, /missing or inaccessible/);
+      assert.match(message, /stat failed/);
+      // No attached cause may echo the path later.
+      assert.equal((err as { cause?: unknown }).cause, undefined);
+      return true;
+    },
+  );
+});
+
+test("epg-store warns redact local sources and keep remote diagnostics", async () => {
+  const warns: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]): void => {
+    warns.push(args);
+  };
+  try {
+    // Empty result: the source is logged by file name only.
+    const emptyIo = fakeIo({ "C:/Users/Secret/guide.xml": "<tv></tv>" });
+    await assert.rejects(
+      doFetchWithFallback(["file:///C:/Users/Secret/guide.xml"], undefined, emptyIo),
+      /no programs/,
+    );
+    assert.equal(warns.length, 1);
+    assert.equal(warns[0][0], "[epg] empty result from file://…/guide.xml");
+
+    // Failure: redacted source plus an error object without the path, while
+    // still carrying the reason a developer needs.
+    warns.length = 0;
+    const failing = fakeIo({});
+    failing.stat = async () => {
+      throw new Error("ENOENT: no such file or directory, stat 'C:\\Users\\Secret\\guide.xml'");
+    };
+    await assert.rejects(
+      doFetchWithFallback(["file:///C:/Users/Secret/guide.xml"], undefined, failing),
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        assert.ok(!message.includes("Secret"), message);
+        return true;
+      },
+    );
+    assert.equal(warns.length, 1);
+    assert.equal(warns[0][0], "[epg] fetch failed for file://…/guide.xml:");
+    const logged = warns[0][1];
+    const loggedMessage = logged instanceof Error ? logged.message : String(logged);
+    assert.ok(!loggedMessage.includes("Secret"), loggedMessage);
+    assert.ok(!loggedMessage.includes("C:\\Users"), loggedMessage);
+    assert.match(loggedMessage, /ENOENT/);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  // Remote sources keep their full URL in every message.
+  assert.equal(epgSourceLabel("https://example.com/guide.xml"), "https://example.com/guide.xml");
   assert.equal(localFileLogLabel("https://example.com/guide.xml"), "file://…");
 });
 

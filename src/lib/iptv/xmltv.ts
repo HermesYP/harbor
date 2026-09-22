@@ -1,5 +1,10 @@
 import type { EpgChannelMeta, EpgProgram, XmltvParseResult } from "./types";
-import { isLocalFileUrl, localFilePathFromUrl, readLocalTextFile } from "./local-file.ts";
+import {
+  isLocalFileUrl,
+  localFilePathFromUrl,
+  readLocalTextFile,
+  type LocalFileIo,
+} from "./local-file.ts";
 
 const MAX_BYTES = 200 * 1024 * 1024;
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -14,6 +19,44 @@ export function localFileLogLabel(url: string): string {
   const path = localFilePathFromUrl(url);
   const name = path ? path.split(/[\\/]/).filter(Boolean).pop() : undefined;
   return name ? `file://…/${name}` : "file://…";
+}
+
+/** Source label for EPG log/warn messages: redacted for local files, the URL verbatim for remote. */
+export function epgSourceLabel(url: string): string {
+  return isLocalFileUrl(url) ? localFileLogLabel(url) : url;
+}
+
+/**
+ * Rebuild a local-file load error so it keeps the reason (including nested
+ * causes such as ENOENT, which readLocalTextFile already inlines) and any
+ * error code, but never the absolute path or the raw `file://` URL. Any
+ * attached `cause` chain is dropped: it is the one place a nested error could
+ * still echo the path after the message has been scrubbed.
+ */
+function redactLocalFileError(e: unknown, fileUrl: string): Error {
+  const original = e instanceof Error ? e : new Error(String(e));
+  const label = localFileLogLabel(fileUrl);
+  const path = localFilePathFromUrl(fileUrl);
+  const trimmed = fileUrl.trim();
+  // These entries must match what readLocalTextFile embeds: the raw URL and
+  // its 120-character truncation from the "not an absolute local file" error.
+  const secrets = [
+    trimmed,
+    trimmed.slice(0, 120),
+    path ?? "",
+    // Windows/UNC errors echo the path with backslashes.
+    (path ?? "").split("/").join("\\"),
+  ].filter((secret) => secret.length > 0);
+  let message = original.message;
+  for (const secret of secrets) message = message.split(secret).join(label);
+  const hasCause = "cause" in original && original.cause !== undefined;
+  if (message === original.message && !hasCause) return original;
+  const scrubbed = new Error(message);
+  const code = (original as { code?: unknown }).code;
+  if (typeof code === "string" || typeof code === "number") {
+    (scrubbed as { code?: unknown }).code = code;
+  }
+  return scrubbed;
 }
 
 async function iptvFetch(url: string, signal: AbortSignal): Promise<Response> {
@@ -48,6 +91,7 @@ async function iptvFetch(url: string, signal: AbortSignal): Promise<Response> {
 export async function fetchAndParseXmltv(
   url: string,
   onProgress?: (programs: EpgProgram[], channelMeta: Map<string, EpgChannelMeta>) => void,
+  io?: LocalFileIo,
 ): Promise<XmltvParseResult> {
   if (isLocalFileUrl(url)) {
     // Local XMLTV file: bounded read, no network, no derived paths.
@@ -55,7 +99,15 @@ export async function fetchAndParseXmltv(
     // tell guides apart.
     const label = localFileLogLabel(url);
     console.info(`[epg] read local file ${label}`);
-    const text = await readLocalTextFile(url, MAX_BYTES);
+    let text: string;
+    try {
+      text = await readLocalTextFile(url, MAX_BYTES, io);
+    } catch (e) {
+      // Callers log and surface this error (epg-store warnings, the UI error
+      // state): it must never carry the absolute path, including paths a
+      // nested ENOENT echoes back.
+      throw redactLocalFileError(e, url);
+    }
     const out = parseXmltv(text);
     console.info(
       `[epg] parsed ${out.programs.length} programs, ${out.channelMeta.size} channel defs (local file) from ${label}`,

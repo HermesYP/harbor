@@ -1,4 +1,7 @@
-import { fetchAndParseXmltv, indexProgramsByChannel } from "./xmltv";
+// Value imports carry the `.ts` extension (node --test strips types but does
+// not resolve extensionless specifiers); type-only imports are erased.
+import { epgSourceLabel, fetchAndParseXmltv, indexProgramsByChannel } from "./xmltv.ts";
+import type { LocalFileIo } from "./local-file";
 import type { EpgChannelMeta, EpgIndex, EpgProgram } from "./types";
 
 const TTL_MS = 60 * 60 * 1000;
@@ -88,20 +91,26 @@ export async function loadEpg(params: {
   }
 }
 
-async function doFetchWithFallback(
+/**
+ * Fetch an EPG with per-URL fallback. Exported with an optional `io` so
+ * tests can drive the local-file warn paths through an injected filesystem;
+ * production callers omit it and go through the Tauri fs plugin.
+ */
+export async function doFetchWithFallback(
   urls: string[],
   onProgress?: (programs: EpgProgram[], channelMeta: Map<string, EpgChannelMeta>) => void,
+  io?: LocalFileIo,
 ): Promise<EpgIndex> {
   if (urls.length === 0) throw new Error("No EPG URL available for this playlist");
   let lastErr: unknown = null;
   let lastMeta: Map<string, EpgChannelMeta> | undefined;
   for (const url of urls) {
     try {
-      const { programs, channelMeta } = await fetchAndParseXmltv(url, onProgress);
+      const { programs, channelMeta } = await fetchAndParseXmltv(url, onProgress, io);
       if (channelMeta.size > 0) lastMeta = channelMeta;
       if (programs.length === 0) {
         lastErr = new Error("EPG endpoint returned no programs");
-        console.warn(`[epg] empty result from ${url}`);
+        console.warn(`[epg] empty result from ${epgSourceLabel(url)}`);
         continue;
       }
       return {
@@ -111,7 +120,10 @@ async function doFetchWithFallback(
       };
     } catch (e) {
       lastErr = e;
-      console.warn(`[epg] fetch failed for ${url}:`, e);
+      // Local-file errors are sanitized inside the xmltv local reader, so `e`
+      // carries the reason without the absolute path; remote URLs keep their
+      // full diagnostics.
+      console.warn(`[epg] fetch failed for ${epgSourceLabel(url)}:`, e);
     }
   }
   if (lastMeta && lastMeta.size > 0) {
