@@ -16,11 +16,24 @@ export function useAutoEndExit(params: {
   roomGuest: boolean;
   isLive: boolean;
   suspend: boolean;
+  holdForEndRecommendations: boolean;
   startedNearEndRef: RefObject<boolean>;
   reloadLive: () => void;
   closePlayer: () => void | Promise<void>;
 }) {
-  const { src, snap, nextEp, canChangeEpisode, roomGuest, isLive, suspend, startedNearEndRef, reloadLive, closePlayer } = params;
+  const {
+    src,
+    snap,
+    nextEp,
+    canChangeEpisode,
+    roomGuest,
+    isLive,
+    suspend,
+    holdForEndRecommendations,
+    startedNearEndRef,
+    reloadLive,
+    closePlayer,
+  } = params;
   const firedForRef = useRef<string | null>(null);
   const reloadTimesRef = useRef<number[]>([]);
 
@@ -51,6 +64,9 @@ export function useAutoEndExit(params: {
     }
 
     if (suspend) return;
+    // Hold the post-end auto-close while the "More Like This" overlay is
+    // loading or showing; released (effect re-runs) when it settles empty.
+    if (holdForEndRecommendations) return;
     if (!isLive && startedNearEndRef.current) return;
     if ((canChangeEpisode || roomGuest) && nextEp) return;
     if (firedForRef.current === src.url) return;
@@ -59,5 +75,18 @@ export function useAutoEndExit(params: {
       void closePlayer();
     }, POST_END_DELAY_MS);
     return () => window.clearTimeout(t);
-  }, [snap.status, snap.errorCode, snap.durationSec, nextEp, canChangeEpisode, roomGuest, isLive, suspend, reloadLive, src.url, closePlayer]);
+  }, [
+    snap.status,
+    snap.errorCode,
+    snap.durationSec,
+    nextEp,
+    canChangeEpisode,
+    roomGuest,
+    isLive,
+    suspend,
+    holdForEndRecommendations,
+    reloadLive,
+    src.url,
+    closePlayer,
+  ]);
 }

@@ -3,6 +3,7 @@ import { registerCache } from "@/lib/memory-profiler";
 import { safeFetch as fetch } from "@/lib/safe-fetch";
 import type { Meta } from "./cinemeta";
 import type { PlayEpisode } from "./view";
+import { computeAdjacent, type EpisodeAdjacency } from "./episode-adjacency";
 import { tmdbDetails, tmdbSeasonEpisodes } from "./providers/tmdb";
 import { resolveMeta } from "./meta-resource";
 import { animeKitsuMeta } from "./providers/anime-kitsu-addon";
@@ -135,7 +136,7 @@ async function getNonStandardEpisodes(meta: Meta): Promise<PlayEpisode[] | null>
   return getAddonEpisodes(meta.id);
 }
 
-type Adjacent = { prev: PlayEpisode | null; next: PlayEpisode | null };
+type Adjacent = EpisodeAdjacency;
 
 const TT_CACHE_MAX = 800;
 const SEASON_CACHE_MAX = 400;
@@ -168,7 +169,12 @@ async function getAddonEpisodes(id: string): Promise<PlayEpisode[] | null> {
     const episode =
       typeof v.episode === "number" ? v.episode : typeof v.number === "number" ? v.number : null;
     if (season == null || episode == null || season < 1) continue;
-    const ep: PlayEpisode = { season, episode, name: v.title || v.name || undefined, still: v.thumbnail };
+    const ep: PlayEpisode = {
+      season,
+      episode,
+      name: v.title || v.name || undefined,
+      still: v.thumbnail,
+    };
     const vid = (v as { id?: string }).id;
     if (vid && (vid.startsWith("kitsu:") || vid.startsWith("mal:"))) ep.kitsuStreamId = vid;
     else if (vid) ep.videoId = vid;
@@ -191,13 +197,15 @@ export async function fetchAdjacentEpisodes(
     if (eps) return computeAdjacent(eps, current);
   }
 
-  if (meta.type !== "series" && !isAnimeId(meta.id)) return { prev: null, next: null };
+  if (meta.type !== "series" && !isAnimeId(meta.id)) {
+    return { prev: null, next: null, currentFound: false };
+  }
 
   if (meta.id.startsWith("tt")) {
     const key = `${meta.id}:${current.season}:${current.episode}`;
     if (ttCache.has(key)) return ttCache.get(key)!;
     const eps = await loadCinemetaEpisodes(meta.id);
-    if (!eps) return { prev: null, next: null };
+    if (!eps) return { prev: null, next: null, currentFound: false };
     const result = computeAdjacent(eps, current);
     lruSet(ttCache, key, result, TT_CACHE_MAX);
     return result;
@@ -205,12 +213,12 @@ export async function fetchAdjacentEpisodes(
 
   if (meta.id.startsWith("tmdb:tv:") && opts.tmdbKey) {
     const tvId = parseInt(meta.id.split(":")[2] ?? "", 10);
-    if (!Number.isFinite(tvId)) return { prev: null, next: null };
+    if (!Number.isFinite(tvId)) return { prev: null, next: null, currentFound: false };
     return tmdbAdjacent(opts.tmdbKey, tvId, current);
   }
 
   const eps = await getNonStandardEpisodes(meta);
-  if (!eps) return { prev: null, next: null };
+  if (!eps) return { prev: null, next: null, currentFound: false };
   return computeAdjacent(eps, current);
 }
 
@@ -236,9 +244,7 @@ export async function fetchUpcomingEpisodes(
     let cursor = current.episode;
     while (out.length < count && season <= current.season + 3) {
       const eps = await tmdbSeason(opts.tmdbKey, tvId, season);
-      const start = season === current.season
-        ? eps.findIndex((e) => e.episode === cursor) + 1
-        : 0;
+      const start = season === current.season ? eps.findIndex((e) => e.episode === cursor) + 1 : 0;
       if (start < 0) break;
       for (let i = start; i < eps.length && out.length < count; i++) out.push(eps[i]);
       season += 1;
@@ -274,11 +280,7 @@ async function loadCinemetaEpisodes(id: string): Promise<PlayEpisode[] | null> {
   for (const v of raw) {
     const season = typeof v.season === "number" ? v.season : null;
     const episode =
-      typeof v.episode === "number"
-        ? v.episode
-        : typeof v.number === "number"
-          ? v.number
-          : null;
+      typeof v.episode === "number" ? v.episode : typeof v.number === "number" ? v.number : null;
     if (season == null || episode == null) continue;
     if (season < 1) continue;
     eps.push({
@@ -348,7 +350,10 @@ export async function fetchSeasonEpisodes(
   return (eps ?? []).filter((e) => animeSeasonKey(e) === season);
 }
 
-export async function fetchEpisodeList(meta: Meta, opts: { tmdbKey: string }): Promise<PlayEpisode[]> {
+export async function fetchEpisodeList(
+  meta: Meta,
+  opts: { tmdbKey: string },
+): Promise<PlayEpisode[]> {
   if (meta.type !== "series" && !isAnimeId(meta.id)) return [];
   if (meta.id.startsWith("tt")) return (await loadCinemetaEpisodes(meta.id)) ?? [];
   if (meta.id.startsWith("tmdb:tv:") && opts.tmdbKey) {
@@ -375,15 +380,6 @@ export function nextUnwatchedAfter(
     if (!isWatched(sorted[i].season, sorted[i].episode)) return sorted[i];
   }
   return null;
-}
-
-function computeAdjacent(eps: PlayEpisode[], current: { season: number; episode: number }): Adjacent {
-  const idx = eps.findIndex((v) => v.season === current.season && v.episode === current.episode);
-  if (idx === -1) return { prev: null, next: null };
-  return {
-    prev: idx > 0 ? eps[idx - 1] : null,
-    next: idx < eps.length - 1 ? eps[idx + 1] : null,
-  };
 }
 
 async function tmdbSeason(key: string, tvId: number, season: number): Promise<PlayEpisode[]> {
@@ -426,5 +422,5 @@ async function tmdbAdjacent(
     const after = await tmdbSeason(key, tvId, current.season + 1);
     if (after.length > 0) next = after[0];
   }
-  return { prev, next };
+  return { prev, next, currentFound: idx >= 0 };
 }
