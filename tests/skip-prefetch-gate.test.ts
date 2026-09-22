@@ -37,10 +37,7 @@ function gate(over: Partial<SkipFlags> = {}): boolean {
 // Read the shipped defaults (same pattern as poster-backdrop-expansion.test.ts;
 // defaults.ts imports the @/ alias, which plain node cannot resolve).
 function defaultSkipSettings(): SkipFlags {
-  const source = readFileSync(
-    new URL("../src/lib/settings/defaults.ts", import.meta.url),
-    "utf8",
-  );
+  const source = readFileSync(new URL("../src/lib/settings/defaults.ts", import.meta.url), "utf8");
   const read = (name: string): boolean => {
     const match = source.match(new RegExp(`\\b${name}: (true|false)`));
     assert.ok(match, `default for ${name} not found in defaults.ts`);
@@ -159,9 +156,6 @@ test("no file outside the four call sites invokes prefetchSegments", () => {
 // prefetchSkipSegments. A hardcoded `true` here would bypass the whole gate
 // after every view-level check above still passes, re-triggering the popup.
 test("prefetchSegments forwards its enabled flag to prefetchSkipSegments", () => {
-  const source = readFileSync(
-    new URL("../src/lib/skip-intro/index.ts", import.meta.url),
-    "utf8",
-  );
+  const source = readFileSync(new URL("../src/lib/skip-intro/index.ts", import.meta.url), "utf8");
   assert.match(source, /prefetchSkipSegments\(\s*enabled\s*,\s*\{/);
 });
