@@ -4,7 +4,7 @@ import { dlog, dwarn } from "@/lib/debug";
 import { isAddonRanked, isStatusOnlyAddon } from "./addon-detect";
 import type { AddonRankFn } from "./addon-priority";
 import { hasUncachedMarker } from "./cached";
-import { infoHashFromSources, infoHashFromUrl } from "@/lib/torrent/magnet";
+import { fileIdxFromUrlForHash, infoHashFromSources, infoHashFromUrl } from "@/lib/torrent/magnet";
 import type { Stream } from "./types";
 
 const TIMEOUT_MS_FAST = 8000;
@@ -315,14 +315,18 @@ async function fetchOne(
           addonUrl: addon.transportUrl,
           addonRanked: ranked,
         };
+        const fromUrl = s.url ? infoHashFromUrl(s.url) : null;
         if (!mapped.infoHash && hasUncachedMarker(s)) {
-          const fromUrl = s.url ? infoHashFromUrl(s.url) : null;
           const hash = fromUrl?.infoHash ?? infoHashFromSources(s.sources);
-          if (hash) {
-            mapped.infoHash = hash;
-            if (mapped.fileIdx == null && fromUrl?.fileIdx != null)
-              mapped.fileIdx = fromUrl.fileIdx;
-          }
+          if (hash) mapped.infoHash = hash;
+        }
+        // The addon may already know the infoHash while a hosted torrent-server
+        // url still names the intended file. Inherit that index only when the
+        // url's hash matches the stream's own hash; never override an explicit
+        // fileIdx, and never trust a foreign hash or a malformed index.
+        if (mapped.fileIdx == null && mapped.infoHash) {
+          const urlIdx = fileIdxFromUrlForHash(s.url, mapped.infoHash);
+          if (urlIdx != null) mapped.fileIdx = urlIdx;
         }
         return mapped;
       });

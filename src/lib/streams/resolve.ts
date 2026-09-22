@@ -32,6 +32,7 @@ import {
 } from "@/lib/torrent/stremio-stream";
 import type { ParsedStream, ScoredStream } from "./types";
 import { matchEpisodeFileIndex, type EpisodeHint } from "./episode-file";
+import { fileIdxFromUrlForHash } from "@/lib/torrent/magnet";
 
 export type ResolveResult =
   | { ok: true; data: DirectLink; via: string; readiness?: LinkReadiness }
@@ -341,12 +342,21 @@ async function tryLocalEngine(
   hint?: EpisodeHint,
 ): Promise<DirectLink | null> {
   if (!stream.infoHash || !localTorrentAllowed() || signal.aborted) return null;
-  const addIdx =
-    typeof stream.fileIdx === "number" && stream.fileIdx >= 0 ? stream.fileIdx : undefined;
+  // Streams parsed from addons normally carry fileIdx already, but a hosted
+  // torrent-server url can still name the intended file when it went missing.
+  // Inherit it only for the same hash: an explicit fileIdx always wins, and a
+  // foreign hash or malformed index falls back to the episode/largest guess.
+  const ownIdx =
+    typeof stream.fileIdx === "number" &&
+    Number.isSafeInteger(stream.fileIdx) &&
+    stream.fileIdx >= 0
+      ? stream.fileIdx
+      : undefined;
+  const intendedIdx = ownIdx ?? fileIdxFromUrlForHash(stream.url, stream.infoHash);
   const added = await torrentEngineAdd(
     magnetFromHash(stream.infoHash),
     trackersFromSources(stream.sources),
-    addIdx,
+    intendedIdx,
   );
   if (!added) return null;
   const releaseAbortCleanup = registerAbortCleanup(added, signal);
@@ -354,8 +364,8 @@ async function tryLocalEngine(
   try {
     if (added.files.length === 0 || signal.aborted) return null;
     const filename = stream.behaviorHints?.filename ?? stream.behaviorHints?.fileName ?? null;
-    let chosenIdx = stream.fileIdx;
-    if (chosenIdx == null || chosenIdx < 0) {
+    let chosenIdx = intendedIdx;
+    if (chosenIdx == null) {
       const season = hint?.season ?? stream.season;
       const episode = hint?.episode ?? stream.episode;
       chosenIdx = selectEngineFileIdx(added.files, season, episode);
