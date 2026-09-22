@@ -6,6 +6,8 @@ import type { Settings } from "@/lib/settings";
 import type { DebridStore } from "@/lib/debrid/types";
 import { fetchAdjacentEpisodes } from "@/lib/series-episodes";
 import { findLocalEpisode, localShowEpisodes } from "@/lib/local-library";
+import { completedDownloadFor } from "@/lib/download/downloads-store";
+import { downloadPlayerSrc } from "@/lib/download/player-src";
 import { isLocalUrl } from "@/lib/player/local-url";
 import { localPlayerSrc } from "@/views/library/local-tab/show-group";
 
@@ -61,10 +63,14 @@ export function useEpisodeNavigation(params: {
         setAdjacent({
           prev:
             r.prev ??
-            (localPrev ? { season: localPrev.season as number, episode: localPrev.episode as number } : null),
+            (localPrev
+              ? { season: localPrev.season as number, episode: localPrev.episode as number }
+              : null),
           next:
             r.next ??
-            (localNext ? { season: localNext.season as number, episode: localNext.episode as number } : null),
+            (localNext
+              ? { season: localNext.season as number, episode: localNext.episode as number }
+              : null),
         });
         return;
       }
@@ -86,6 +92,12 @@ export function useEpisodeNavigation(params: {
           replacePlayerSrc(localPlayerSrc(local));
           return;
         }
+      }
+      // A completed download of this exact episode beats the stream picker.
+      const downloaded = completedDownloadFor(src.meta.id, ep.season, ep.episode);
+      if (downloaded) {
+        replacePlayerSrc(downloadPlayerSrc(downloaded));
+        return;
       }
       openPicker(src.meta, ep, { autoPlay: true });
     },
