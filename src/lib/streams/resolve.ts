@@ -362,8 +362,7 @@ async function tryLocalEngine(
   const urlIdx = isHostedTorrentServerUrl(stream.url)
     ? fileIdxFromUrlForHash(stream.url, stream.infoHash)
     : undefined;
-  const urlBackedIdx =
-    urlIdx != null && (ownIdx == null || ownIdx === urlIdx) ? urlIdx : undefined;
+  const urlBackedIdx = urlIdx != null && (ownIdx == null || ownIdx === urlIdx) ? urlIdx : undefined;
   // librqbit validates AddTorrentOptions.only_files against the metadata it
   // fetches inside add_torrent and fails the WHOLE add on an out-of-range id
   // (librqbit 8.1.1 session.rs: "file id N is out of range"), so a URL-backed

@@ -393,7 +393,8 @@ function dedupeStreams(streams: Stream[]): Stream[] {
           (mergedCached ??= { ...priorCached })[slug] = true;
         }
       }
-      if (mergedCached) (prior as { cached?: Partial<Record<string, boolean>> }).cached = mergedCached;
+      if (mergedCached)
+        (prior as { cached?: Partial<Record<string, boolean>> }).cached = mergedCached;
     }
     if (s.behaviorHints) {
       const hints: NonNullable<Stream["behaviorHints"]> = { ...prior.behaviorHints };
