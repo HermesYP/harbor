@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { performAuthKeyLogin } from "./auth-key-login";
 import { stremioSourceProfileId, useProfiles, type Profile } from "./profiles";
 import { getUser, login as apiLogin, type User } from "./stremio";
 
@@ -105,13 +106,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signInWithKey = useCallback(
-    async (authKey: string) => {
-      const key = authKey.trim();
-      if (!key) throw new Error("No sign-in key received. Try again.");
-      const fetched = await getUser(key).catch(() => null);
-      const user: User = fetched?._id ? fetched : { _id: `stremio:${key.slice(0, 10)}`, email: "" };
-      commitSession({ authKey: key, user });
-    },
+    (authKey: string) =>
+      performAuthKeyLogin(authKey, {
+        fetchUser: (key) => getUser(key).catch(() => null),
+        commit: commitSession,
+      }),
     [commitSession],
   );
 

@@ -1,9 +1,11 @@
-import { Check, ExternalLink, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Check, ExternalLink, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/lib/auth";
 import { useT } from "@/lib/i18n";
 import { openUrl } from "@/lib/window";
+import { AuthKeyForm } from "./auth-modal/auth-key-form";
+import { Field } from "./auth-modal/field";
 import { StremioWebButton } from "./auth-modal/stremio-web-button";
 
 export function AuthModal({ onClose }: { onClose: () => void }) {
@@ -42,7 +44,7 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="animate-modal-in flex w-[min(92vw,400px)] flex-col gap-5 rounded-2xl border border-edge-soft bg-elevated p-7 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)]"
+        className="animate-modal-in flex max-h-[92vh] w-[min(92vw,400px)] flex-col gap-5 overflow-y-auto rounded-2xl border border-edge-soft bg-elevated p-7 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)]"
       >
         <div className="flex flex-col items-center gap-2">
           <h2 className="font-display text-[22px] font-medium tracking-tight text-ink">
@@ -95,7 +97,9 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
           </span>
           <span className="flex flex-col">
             <span className="text-[13px] font-medium text-ink">{t("Remember me")}</span>
-            <span className="text-[11.5px] text-ink-subtle">{t("Stays signed in on this device only.")}</span>
+            <span className="text-[11.5px] text-ink-subtle">
+              {t("Stays signed in on this device only.")}
+            </span>
           </span>
         </button>
 
@@ -118,6 +122,16 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
           )}
         </button>
 
+        <div className="flex items-center gap-3">
+          <span className="h-px flex-1 bg-edge-soft" />
+          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-subtle">
+            {t("or use authentication key")}
+          </span>
+          <span className="h-px flex-1 bg-edge-soft" />
+        </div>
+
+        <AuthKeyForm onDone={onClose} disabled={busy} />
+
         <div className="flex items-center justify-between gap-3 pt-1">
           <button
             type="button"
@@ -138,60 +152,5 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
       </form>
     </div>,
     document.body,
-  );
-}
-
-function Field({
-  label,
-  type,
-  value,
-  onChange,
-  autoFocus,
-  disabled,
-}: {
-  label: string;
-  type: string;
-  value: string;
-  onChange: (v: string) => void;
-  autoFocus?: boolean;
-  disabled?: boolean;
-}) {
-  const t = useT();
-  const [show, setShow] = useState(false);
-  const isPassword = type === "password";
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-subtle">
-        {label}
-      </span>
-      <div className="relative">
-        <input
-          type={isPassword && show ? "text" : type}
-          value={value}
-          autoFocus={autoFocus}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-          spellCheck={false}
-          autoComplete={isPassword ? "current-password" : "email"}
-          className={`h-11 w-full rounded-xl border border-edge bg-canvas px-3.5 text-[14px] text-ink outline-none transition-colors focus:border-ink disabled:opacity-50 ${
-            isPassword ? "pe-11" : ""
-          }`}
-        />
-        {isPassword && (
-          <button
-            type="button"
-            tabIndex={-1}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setShow((v) => !v)}
-            disabled={disabled}
-            aria-label={show ? t("Hide password") : t("Show password")}
-            title={show ? t("Hide password") : t("Show password")}
-            className="absolute inset-y-0 end-0 flex w-11 items-center justify-center text-ink-subtle transition-colors hover:text-ink disabled:opacity-50"
-          >
-            {show ? <EyeOff size={17} strokeWidth={2} /> : <Eye size={17} strokeWidth={2} />}
-          </button>
-        )}
-      </div>
-    </label>
   );
 }
