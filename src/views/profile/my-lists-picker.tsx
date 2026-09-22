@@ -201,7 +201,13 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
     [entries, selected, privacy],
   );
   const overLimit = selected.length > MAX_FEATURED_LISTS;
-  const ready = isSaveReady(loadedFor, handle, anilistUserId, anilistVerified, blocked || overLimit);
+  const ready = isSaveReady(
+    loadedFor,
+    handle,
+    anilistUserId,
+    anilistVerified,
+    blocked || overLimit,
+  );
 
   useEffect(() => {
     // Drop everything derived from the previous account/state before fetching:
@@ -231,9 +237,7 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
         // Only verified AniList lists join the candidates; cached results
         // and disconnected profiles reconcile against local lists alone.
         const candidates = [...readLocalLists(), ...(profile.verified ? profile.lists : [])];
-        setSelected(
-          reconcileFeatured(featured, candidates, profile.names).selected,
-        );
+        setSelected(reconcileFeatured(featured, candidates, profile.names).selected);
         if (anilistUserId != null && !profile.verified) {
           // A failed connected fetch cannot authorize republishing possibly
           // private served rows. Keep them visible and disable Save.
@@ -280,7 +284,11 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
     setError(null);
     try {
       const picked = publishableSelection(entries, selected, privacy);
-      await saveFeaturedLists(buildFeaturedPayload(picked, served, lists, anilistNames), true, handle);
+      await saveFeaturedLists(
+        buildFeaturedPayload(picked, served, lists, anilistNames),
+        true,
+        handle,
+      );
       onClose?.();
     } catch {
       setError(t("Could not save. Try again."));
@@ -365,9 +373,10 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
             </>
           )}
           {blocked && (
-            <p className="text-[13px] text-danger">
-              {t("Some lists can no longer be featured. Remove them to save.")}
-            </p>
+            <div className="space-y-1 text-[13px] text-danger">
+              <p>{t("Some lists can no longer be featured. Remove them to save.")}</p>
+              <p>{t("Removing a list not in your library deletes it from your profile.")}</p>
+            </div>
           )}
           {overLimit && (
             <p className="text-[13px] text-danger">

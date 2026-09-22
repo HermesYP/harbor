@@ -108,10 +108,10 @@ test("identity: duplicate identical custom names still get unique stable ids", (
   ]);
   assert.equal(lists.length, 2);
   assert.notEqual(lists[0].id, lists[1].id);
-  assert.deepEqual(
-    lists.map((l) => l.id).sort(),
-    ["anilist:custom:same:1", "anilist:custom:same:2"],
-  );
+  assert.deepEqual(lists.map((l) => l.id).sort(), [
+    "anilist:custom:same:1",
+    "anilist:custom:same:2",
+  ]);
 });
 
 test("mapping: private entries never reach the featured payload", () => {
@@ -206,28 +206,28 @@ test("picker: AniList candidates join the pickable set only when verified, gated
   );
   assert.match(src, /fetchProfileLists\(anilistUserId\)/);
   // unverified (cache/pre-settle) AniList candidates are hidden from the rows
-  assert.match(src, /\[\.\.\.local\.map\(toPickableList\), \.\.\.\(anilistVerified \? anilist : \[\]\)\]/);
+  assert.match(
+    src,
+    /\[\.\.\.local\.map\(toPickableList\), \.\.\.\(anilistVerified \? anilist : \[\]\)\]/,
+  );
   assert.match(src, /reconcileFeatured\(featured, candidates, profile\.names\)/);
   // account switch / failed fetch: previous account state is reset before fetching
   assert.match(src, /setLoadedFor\(undefined\);/);
   assert.match(src, /setAnilistVerified\(false\);/);
   assert.match(src, /setSelected\(\[\]\);/);
   // Save readiness is derived per active userId, never latched
-  assert.match(src, /isSaveReady\(loadedFor, handle, anilistUserId, anilistVerified, blocked \|\| overLimit\)/);
+  assert.match(
+    src,
+    /isSaveReady\(\s*loadedFor,\s*handle,\s*anilistUserId,\s*anilistVerified,\s*blocked \|\| overLimit,?\s*\)/,
+  );
   assert.match(src, /useSyncExternalStore\(subscribeAuthor, currentAuthor\)/);
   assert.match(src, /setServed\(\[\]\);/);
   assert.match(src, /\[handle, anilistUserId\]/);
   assert.match(src, /disabled=\{saving \|\| !ready\}/);
   // a connected fetch that failed never marks the load complete
-  assert.match(
-    src,
-    /if \(anilistUserId != null && !profile\.verified\) \{[\s\S]*?return;/,
-  );
+  assert.match(src, /if \(anilistUserId != null && !profile\.verified\) \{[\s\S]*?return;/);
   // unproven selected rows keep Save disabled until explicitly removed
-  assert.match(
-    src,
-    /Some lists can no longer be featured\. Remove them to save\./,
-  );
+  assert.match(src, /Some lists can no longer be featured\. Remove them to save\./);
   // a failed connected fetch explains the disabled Save with a real reason
   assert.match(src, /Could not verify AniList lists\. Reopen this picker to try again\./);
   // the AniList request is scoped to the connected owner's own userId only

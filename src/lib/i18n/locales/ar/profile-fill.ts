@@ -1,7 +1,7 @@
 const profileFill: Record<string, string> = {
-  "General": "عام",
-  "Look": "المظهر",
-  "optional": "اختياري",
+  General: "عام",
+  Look: "المظهر",
+  optional: "اختياري",
   "Your name and the details shown at the top of your profile.":
     "اسمك والتفاصيل التي تظهر أعلى ملفك الشخصي.",
   "Your avatar, banner, and how the whole profile is styled.":
@@ -12,8 +12,7 @@ const profileFill: Record<string, string> = {
     "تحكّم بمن يمكنه رؤية أصدقائك ونشاطك وإحصائياتك.",
   "Show a Minecraft card on your profile. Leave the username blank to hide it.":
     "اعرض بطاقة Minecraft في ملفك الشخصي. اترك اسم المستخدم فارغًا لإخفائها.",
-  "Show a Minecraft card with your username":
-    "اعرض بطاقة Minecraft باسم المستخدم الخاص بك",
+  "Show a Minecraft card with your username": "اعرض بطاقة Minecraft باسم المستخدم الخاص بك",
   "Showing {name}": "يظهر {name}",
   "Manage connection": "إدارة الاتصال",
   "Show your Simkl card": "إظهار بطاقة Simkl",
@@ -254,6 +253,8 @@ const profileFill: Record<string, string> = {
   "not in your library": "ليست في مكتبتك",
   "Some lists can no longer be featured. Remove them to save.":
     "بعض القوائم لم تعد قابلة للتمييز. أزلها لتفعيل الحفظ.",
+  "Removing a list not in your library deletes it from your profile.":
+    "إزالة قائمة غير موجودة في مكتبتك تحذفها من ملفك الشخصي.",
   "Could not verify AniList lists. Reopen this picker to try again.":
     "تعذّر التحقق من قوائم AniList. أعد فتح هذه القائمة للمحاولة مرة أخرى.",
   "1 friend in common": "صديق واحد مشترك",

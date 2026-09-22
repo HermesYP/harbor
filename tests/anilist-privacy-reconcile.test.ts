@@ -111,10 +111,7 @@ test("private-empty: an all-private AniList list never re-enters the payload and
   const after = selected.filter((id) => id !== "srv:s-secret");
   assert.equal(hasUnprovenSelection(entries, after, privacy), false);
   const payload = publishableSelection(entries, after, privacy);
-  assert.deepEqual(
-    payload.map((l) => l.name).sort(),
-    ["Local faves", "Other", "Public"].sort(),
-  );
+  assert.deepEqual(payload.map((l) => l.name).sort(), ["Local faves", "Other", "Public"].sort());
 });
 
 test("wiring: reconcileFeatured surfaces unmatched served rows as ghosts and selects them", () => {
@@ -145,7 +142,13 @@ test("over-limit served ghosts stay visible while Save is blocked until removal"
   assert.equal(ghosts.length, 8, "none of the old public rows may disappear silently");
   assert.equal(selected.length, 8);
   assert.equal(
-    isSaveReady({ handle: "alice", anilistUserId: null }, "alice", null, false, selected.length > 6),
+    isSaveReady(
+      { handle: "alice", anilistUserId: null },
+      "alice",
+      null,
+      false,
+      selected.length > 6,
+    ),
     false,
   );
 });
@@ -212,9 +215,7 @@ test("no-adoption: a legacy AniList record is never absorbed by a same-name loca
     items: [item("mal:50")],
     source: "anilist",
   };
-  assert.deepEqual(matchSelection(served, [...locals, anilistFaves], names), [
-    "anilist:0:faves",
-  ]);
+  assert.deepEqual(matchSelection(served, [...locals, anilistFaves], names), ["anilist:0:faves"]);
   assert.deepEqual(
     buildGhosts(served, [...locals, anilistFaves], names).map((g) => g.id),
     ["srv:s2", "srv:s3"],
@@ -247,10 +248,12 @@ test("failure: an AniList request failure serves the cache flagged unverified an
     // ...and a previously served AniList-backed row cannot ride on the cache either.
     const ghost: PickableList = { id: "srv:s1", name: "Faves", items: [item("mal:50")] };
     assert.equal(isPublishable(ghost, privacy), false);
-    // Save readiness: pending, failed, and account-switch states all stay off.
-    assert.equal(isSaveReady(undefined, 77, false, false), false, "load pending");
-    assert.equal(isSaveReady(77, 77, false, false), false, "connected but unverified");
-    assert.equal(isSaveReady(123, 77, false, false), false, "stale other-account load");
+    // The picker leaves loadedFor undefined on a failed connected fetch;
+    // even a stale completed load cannot authorize publishing cached rows.
+    const loaded = { handle: "alice", anilistUserId: 77 };
+    assert.equal(isSaveReady(undefined, "alice", 77, false, false), false, "load pending");
+    assert.equal(isSaveReady(loaded, "alice", 77, false, false), false, "unverified fetch");
+    assert.equal(isSaveReady(loaded, "alice", 123, true, false), false, "other AniList account");
   } finally {
     globalThis.fetch = originalFetch;
     resetForProfile();
@@ -292,7 +295,8 @@ test("success: a fresh fetch verifies candidates, surfaces every list name, and 
 
     // Beta's group disappears entirely (deleted on AniList): the remembered
     // name must keep its formerly served rows recognizable as AniList-owned.
-    globalThis.fetch = (async () => response([publicGroup("Alpha", 10)])) as unknown as typeof fetch;
+    globalThis.fetch = (async () =>
+      response([publicGroup("Alpha", 10)])) as unknown as typeof fetch;
     const second = await fetchProfileLists(88);
     assert.equal(second.verified, true);
     assert.deepEqual(second.names, ["Alpha", "Beta"]);
@@ -327,10 +331,7 @@ test("ghost provenance: publishability requires positive local proof, never just
   assert.equal(isPublishable(ghostOf({ name: "Known" }), privacy), false);
   // Unverified and disconnected states keep the same item-signature verdicts.
   assert.equal(isPublishable(ghostOf({}), UNVERIFIED_PRIVACY), true);
-  assert.equal(
-    isPublishable(ghostOf({ items: [item("mal:7")] }), UNVERIFIED_PRIVACY),
-    false,
-  );
+  assert.equal(isPublishable(ghostOf({ items: [item("mal:7")] }), UNVERIFIED_PRIVACY), false);
 });
 
 test("save readiness: Harbor and AniList account switches never inherit the previous load", () => {
@@ -343,7 +344,11 @@ test("save readiness: Harbor and AniList account switches never inherit the prev
   assert.equal(isSaveReady(alice, "alice", 7, true, false), true);
   assert.equal(isSaveReady(alice, "alice", 7, false, false), false);
   assert.equal(isSaveReady(alice, "alice", 8, true, false), false);
-  assert.equal(isSaveReady(alice, "bob", 7, true, false), false, "same AniList, other Harbor profile");
+  assert.equal(
+    isSaveReady(alice, "bob", 7, true, false),
+    false,
+    "same AniList, other Harbor profile",
+  );
   assert.equal(isSaveReady(alice, "alice", null, false, false), false);
   assert.equal(isSaveReady(alice, "alice", 7, true, true), false);
   assert.equal(isSaveReady(alice, null, 7, true, false), false);
@@ -355,7 +360,10 @@ test("payload: internal provenance never reaches the backend wire format", () =>
     { id: "anilist:custom:faves", name: "Faves", items: [item("mal:2")], source: "anilist" },
   ];
   const internal = buildFeaturedPayload(selected, [], selected);
-  assert.deepEqual(internal.map((row) => row.source), ["local", "anilist"]);
+  assert.deepEqual(
+    internal.map((row) => row.source),
+    ["local", "anilist"],
+  );
   const wire = featuredWirePayload(internal);
   for (const row of wire) {
     assert.equal("source" in row, false, "backend schema is outside this repo — never send it");

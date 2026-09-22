@@ -66,7 +66,7 @@ export async function load(url, context, nextLoad) {
     // stay untestable. Tests may set globalThis.__HARBOR_TEST_ENV__.
     source = source.replace(
       /import\.meta\.env\b/g,
-      "(globalThis.__HARBOR_TEST_ENV__ ?? {})",
+      "({ DEV: false, PROD: true, ...globalThis.__HARBOR_TEST_ENV__ })",
     );
     const output = ts.transpileModule(source, {
       compilerOptions: {

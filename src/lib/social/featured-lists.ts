@@ -3,11 +3,7 @@ import { authToken, currentAuthor } from "@/lib/theme-auth";
 import { readLists, type CustomList } from "@/lib/custom-lists";
 import { bakeDefaultPosters } from "./featured-posters";
 import { HARBOR_API_BASE } from "@/lib/config/endpoints";
-import {
-  keptFeaturedAfterUnfeature,
-  normalizeListName,
-  type ListSource,
-} from "./list-identity";
+import { keptFeaturedAfterUnfeature, normalizeListName, type ListSource } from "./list-identity";
 
 export { likeList, unlikeList } from "./list-likes";
 export type { ListLike } from "./list-likes";

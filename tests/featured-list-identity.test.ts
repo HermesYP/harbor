@@ -109,7 +109,10 @@ test("legacy: one same-name source with matching content keeps the historical bi
   assert.equal(claims[1].pickId, "A1");
   assert.equal(claims[2].pickId, null);
   const payload = buildFeaturedPayload([picks[1], toGhostList(claims[2])], served, picks);
-  assert.deepEqual(payload.map((p) => p.id), ["S2", "S3"]);
+  assert.deepEqual(
+    payload.map((p) => p.id),
+    ["S2", "S3"],
+  );
 });
 
 test("collision: same-source same-name twins bind only the content-proven one", () => {
@@ -209,7 +212,10 @@ test("ordering: served order survives with ghost slots interleaved and on save",
   ]);
   const picked = selection.map((id) => byId.get(id) ?? assert.fail(`missing entry for ${id}`));
   const payload = buildFeaturedPayload(picked, served, picks);
-  assert.deepEqual(payload.map((p) => p.id), ["S1", "S2", "S3"]);
+  assert.deepEqual(
+    payload.map((p) => p.id),
+    ["S1", "S2", "S3"],
+  );
   assert.deepEqual(payload[1].items, served[1].items);
 });
 
@@ -217,7 +223,10 @@ test("save: the payload never carries duplicate server ids", () => {
   const served = [record("S1", "Watching", { source: "local" })];
   const dup = localList("L1", "Watching");
   const payload = buildFeaturedPayload([dup, dup], served, [dup]);
-  assert.deepEqual(payload.map((p) => p.id), ["S1", ""]);
+  assert.deepEqual(
+    payload.map((p) => p.id),
+    ["S1", ""],
+  );
 });
 
 test("unfeature: scoped deletion fails closed on other sources and unattributed records", () => {
@@ -230,14 +239,23 @@ test("unfeature: scoped deletion fails closed on other sources and unattributed 
     record("S5", "Other", { source: "anilist" }),
   ];
   const kept = keptFeaturedAfterUnfeature(served, "Watching", "local", proof);
-  assert.deepEqual(kept.map((p) => p.id), ["S2", "S4", "S5"]);
+  assert.deepEqual(
+    kept.map((p) => p.id),
+    ["S2", "S4", "S5"],
+  );
   // without a source scope the historical name-scoped removal applies
   const unscoped = keptFeaturedAfterUnfeature(served, "Watching");
-  assert.deepEqual(unscoped.map((p) => p.id), ["S5"]);
+  assert.deepEqual(
+    unscoped.map((p) => p.id),
+    ["S5"],
+  );
 });
 
 test("picker wiring: privacy reconciliation and saving share identity claims", () => {
-  const picker = readFileSync(new URL("../src/views/profile/my-lists-picker.tsx", import.meta.url), "utf8");
+  const picker = readFileSync(
+    new URL("../src/views/profile/my-lists-picker.tsx", import.meta.url),
+    "utf8",
+  );
   const reconcile = readFileSync(
     new URL("../src/lib/social/featured-reconcile.ts", import.meta.url),
     "utf8",
