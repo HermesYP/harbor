@@ -149,8 +149,8 @@ test("every prefetch call site derives its gate from skipPrefetchEnabled", () =>
 test("no file outside the four call sites invokes prefetchSegments", () => {
   const root = new URL("../src/", import.meta.url);
   const callers = readdirSync(root, { recursive: true })
-    .map((entry) => String(entry).replace(/\\/g, "/"))
-    .filter((rel) => rel.endsWith(".ts") || rel.endsWith(".tsx"))
-    .filter((rel) => readFileSync(new URL(rel, root), "utf8").match(PREFETCH_CALL));
+    .map((entry: string) => String(entry).replace(/\\/g, "/"))
+    .filter((rel: string) => rel.endsWith(".ts") || rel.endsWith(".tsx"))
+    .filter((rel: string) => readFileSync(new URL(rel, root), "utf8").match(PREFETCH_CALL));
   assert.deepEqual([...callers].sort(), [...PREFETCH_CALL_SITES].sort());
 });
