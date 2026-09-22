@@ -260,6 +260,10 @@ const profileFill: Record<string, string> = {
   Finished: "Concluído",
   Rated: "Avaliado",
   "not in your library": "não está na sua biblioteca",
+  "Some lists can no longer be featured. Remove them to save.":
+    "Algumas listas não podem mais ser destacadas. Remova-as para salvar.",
+  "Could not verify AniList lists. Reopen this picker to try again.":
+    "Não foi possível verificar as listas do AniList. Reabra este seletor para tentar novamente.",
   "1 friend in common": "1 amigo em comum",
   "{count} friends in common": "{count} amigos em comum",
   "Favourite games": "Jogos favoritos",

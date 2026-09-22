@@ -176,8 +176,14 @@ test("account-switch: one account's cached lists are never served to another", (
 test("account-switch: lists.ts fetches with the shared query, caches per user, and resets with the profile", () => {
   const src = readFileSync(new URL("../src/lib/anilist/lists.ts", import.meta.url), "utf8");
   assert.match(src, /anilistRequest<ProfileListsResponse>\(PROFILE_LISTS_QUERY, \{ userId \}\)/);
-  assert.match(src, /return readCachedProfileLists\(userId\) \?\? \[\];/);
-  assert.match(src, /writeCachedProfileLists\(userId, lists\);/);
+  // cache fallback is reported as unverified so callers can never republish it
+  assert.match(src, /lists: readCachedProfileLists\(userId\) \?\? \[\]/);
+  assert.match(src, /names: readCachedProfileListNames\(userId\) \?\? \[\]/);
+  assert.match(src, /verified: false/);
+  // only a fresh successful response verifies candidates and refreshes names
+  assert.match(src, /profileListGroupNames\(groups\)/);
+  assert.match(src, /writeCachedProfileLists\(userId, lists, names\)/);
+  assert.match(src, /verified: true/);
   assert.match(src, /resetProfileLists\(\);/);
   // 401 triggers a session revalidation instead of surfacing a raw failure
   assert.match(
@@ -193,15 +199,37 @@ test("account-switch: lists.ts fetches with the shared query, caches per user, a
   assert.match(bridge, /resetAnilistLists\(\);/);
 });
 
-test("picker: AniList lists join the pickable set used for matching and saving", () => {
+test("picker: AniList candidates join the pickable set only when verified, gated by source-aware Save readiness", () => {
   const src = readFileSync(
     new URL("../src/views/profile/my-lists-picker.tsx", import.meta.url),
     "utf8",
   );
   assert.match(src, /fetchProfileLists\(anilistUserId\)/);
-  assert.match(src, /readCachedProfileLists\(anilistUserId\)/);
-  assert.match(src, /\[\.\.\.local\.map\(toPickableList\), \.\.\.anilist\]/);
-  assert.match(src, /matchSelection\(featured, pickable\)/);
+  // unverified (cache/pre-settle) AniList candidates are hidden from the rows
+  assert.match(src, /\[\.\.\.local\.map\(toPickableList\), \.\.\.\(anilistVerified \? anilist : \[\]\)\]/);
+  assert.match(src, /reconcileFeatured\(featured, candidates, profile\.names\)/);
+  // account switch / failed fetch: previous account state is reset before fetching
+  assert.match(src, /setLoadedFor\(undefined\);/);
+  assert.match(src, /setAnilistVerified\(false\);/);
+  assert.match(src, /setSelected\(\[\]\);/);
+  // Save readiness is derived per active userId, never latched
+  assert.match(src, /isSaveReady\(loadedFor, handle, anilistUserId, anilistVerified, blocked \|\| overLimit\)/);
+  assert.match(src, /useSyncExternalStore\(subscribeAuthor, currentAuthor\)/);
+  assert.match(src, /setServed\(\[\]\);/);
+  assert.match(src, /\[handle, anilistUserId\]/);
+  assert.match(src, /disabled=\{saving \|\| !ready\}/);
+  // a connected fetch that failed never marks the load complete
+  assert.match(
+    src,
+    /if \(anilistUserId != null && !profile\.verified\) \{[\s\S]*?return;/,
+  );
+  // unproven selected rows keep Save disabled until explicitly removed
+  assert.match(
+    src,
+    /Some lists can no longer be featured\. Remove them to save\./,
+  );
+  // a failed connected fetch explains the disabled Save with a real reason
+  assert.match(src, /Could not verify AniList lists\. Reopen this picker to try again\./);
   // the AniList request is scoped to the connected owner's own userId only
   assert.doesNotMatch(src, /fetchProfileLists\((?!anilistUserId)/);
 });

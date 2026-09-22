@@ -2,6 +2,8 @@ import { AnilistApiError, anilistRequest } from "./client";
 import {
   PROFILE_LISTS_QUERY,
   buildProfileLists,
+  profileListGroupNames,
+  readCachedProfileListNames,
   readCachedProfileLists,
   resetProfileLists,
   writeCachedProfileLists,
@@ -126,17 +128,31 @@ export async function fetchMediaListCollection(userId: number): Promise<AnilistL
 
 type ProfileListsResponse = { MediaListCollection: { lists: ProfileListGroup[] } | null };
 
-const profileListsInflight = new Map<number, Promise<PickableList[]>>();
+const profileListsInflight = new Map<number, Promise<ProfileListsResult>>();
+
+/**
+ * Result of loading the owner's AniList lists as featured-list candidates.
+ * `verified` is true only for a fresh, successful AniList response: cache
+ * fallback is served with `verified: false` so callers can display it but
+ * never republish its items, whose current AniList privacy is unknown.
+ */
+export type ProfileListsResult = {
+  lists: PickableList[];
+  /** Display names of every known AniList list, including all-private ones. */
+  names: string[];
+  verified: boolean;
+};
 
 /**
  * Loads the connected owner's AniList lists as profile-featured candidates.
- * Falls back to the per-user cache when AniList is unreachable; never leaks
- * across accounts because the cache and inflight keys are per AniList userId.
+ * Falls back to the per-user cache when AniList is unreachable, flagged
+ * `verified: false`; never leaks across accounts because the cache and
+ * inflight keys are per AniList userId.
  */
-export async function fetchProfileLists(userId: number): Promise<PickableList[]> {
+export async function fetchProfileLists(userId: number): Promise<ProfileListsResult> {
   const existing = profileListsInflight.get(userId);
   if (existing) return existing;
-  const run = (async () => {
+  const run = (async (): Promise<ProfileListsResult> => {
     const data = await anilistRequest<ProfileListsResponse>(PROFILE_LISTS_QUERY, { userId }).catch(
       (e) => {
         if (e instanceof AnilistApiError && e.status === 401) void validateAnilistSession();
@@ -144,11 +160,22 @@ export async function fetchProfileLists(userId: number): Promise<PickableList[]>
       },
     );
     if (data == null) {
-      return readCachedProfileLists(userId) ?? [];
+      return {
+        lists: readCachedProfileLists(userId) ?? [],
+        names: readCachedProfileListNames(userId) ?? [],
+        verified: false,
+      };
     }
-    const lists = buildProfileLists(data.MediaListCollection?.lists ?? []);
-    writeCachedProfileLists(userId, lists);
-    return lists;
+    const groups = data.MediaListCollection?.lists ?? [];
+    const lists = buildProfileLists(groups);
+    // Remember names beyond the current response: a deleted or renamed AniList
+    // list vanishes from the fetch, and its formerly served rows must stay
+    // recognizable as AniList-owned for privacy reconciliation.
+    const names = [
+      ...new Set([...profileListGroupNames(groups), ...(readCachedProfileListNames(userId) ?? [])]),
+    ];
+    writeCachedProfileLists(userId, lists, names);
+    return { lists, names, verified: true };
   })();
   profileListsInflight.set(userId, run);
   try {

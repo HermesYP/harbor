@@ -236,9 +236,13 @@ test("unfeature: scoped deletion fails closed on other sources and unattributed 
   assert.deepEqual(unscoped.map((p) => p.id), ["S5"]);
 });
 
-test("picker wiring: matching and saving share one claim map", () => {
-  const src = readFileSync(new URL("../src/views/profile/my-lists-picker.tsx", import.meta.url), "utf8");
-  assert.match(src, /resolveFeaturedClaims\(featured, lists\)/);
-  assert.match(src, /resolveFeaturedClaims\(served, lists\)/);
-  assert.match(src, /buildFeaturedPayload\(picked, served, lists\)/);
+test("picker wiring: privacy reconciliation and saving share identity claims", () => {
+  const picker = readFileSync(new URL("../src/views/profile/my-lists-picker.tsx", import.meta.url), "utf8");
+  const reconcile = readFileSync(
+    new URL("../src/lib/social/featured-reconcile.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(picker, /reconcileFeatured\(featured, candidates, profile\.names\)/);
+  assert.match(reconcile, /resolveFeaturedClaims\(served, candidates, anilistNames\)/);
+  assert.match(picker, /buildFeaturedPayload\(picked, served, lists, anilistNames\)/);
 });

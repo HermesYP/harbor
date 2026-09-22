@@ -76,11 +76,14 @@ function groupName(group: ProfileListGroup): string {
 /**
  * Maps raw AniList list groups to pickable profile lists.
  * Private entries are dropped so featuring a list never publishes rows the
- * owner marked private on AniList, and each media appears at most once per list.
+ * owner marked private on AniList, and each media appears at most once per
+ * list. All-private groups yield no candidate; profileListGroupNames retains
+ * their names so previously served rows can be identified as AniList-owned
+ * and blocked until explicitly removed.
  *
  * Identity must survive collection reorders and status-list renames, so it
- * derives from AniList's own keys — the status for status lists, the name for
- * custom lists — never from the group's position in the response.
+ * derives from AniList's own keys — status for status lists, name for custom
+ * lists — never from the group's response position.
  */
 export function buildProfileLists(groups: ProfileListGroup[]): PickableList[] {
   const built: Array<{ group: ProfileListGroup; name: string; items: FeaturedItem[] }> = [];
@@ -109,8 +112,8 @@ export function buildProfileLists(groups: ProfileListGroup[]): PickableList[] {
   });
   // Custom lists are keyed by name; slug collisions (including duplicate
   // identical names) get a deterministic rank — sorted by name, input order
-  // for exact ties — so neither reordering the response nor duplicate names
-  // can change or collide with any list's id.
+  // for exact ties — so distinct names stay stable across response reorders
+  // and exact duplicates remain unique within the response.
   const ranks = new Map<number, number>();
   const bySlug = new Map<string, number[]>();
   built.forEach(({ group, name }, index) => {
@@ -144,32 +147,69 @@ function isStatusList(group: ProfileListGroup): boolean {
   return !group.isCustomList && group.status != null;
 }
 
+/** Names of every AniList group, including all-private or empty groups. */
+export function profileListGroupNames(groups: ProfileListGroup[]): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    const name = groupName(group);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
+}
+
 const CACHE_PREFIX = "harbor.anilist.profilelists.v2.";
-const memCache = new Map<number, PickableList[]>();
+type CachedProfileLists = { lists: PickableList[]; names: string[] };
+const memCache = new Map<number, CachedProfileLists>();
 
 export function profileListsCacheKey(userId: number): string {
   return CACHE_PREFIX + userId;
 }
 
-export function readCachedProfileLists(userId: number): PickableList[] | null {
+function readCachedEntry(userId: number): CachedProfileLists | null {
   const mem = memCache.get(userId);
   if (mem) return mem;
   try {
     const raw = localStorage.getItem(profileListsCacheKey(userId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { lists?: PickableList[] };
+    const parsed = JSON.parse(raw) as { lists?: PickableList[]; names?: string[] };
     if (!parsed || !Array.isArray(parsed.lists)) return null;
-    memCache.set(userId, parsed.lists);
-    return parsed.lists;
+    // Older caches predate the names field; derive them from the lists (this
+    // misses all-private groups, which is safe: callers treat any cache read
+    // as unverified regardless).
+    const names = Array.isArray(parsed.names)
+      ? parsed.names.filter((n): n is string => typeof n === "string")
+      : parsed.lists.map((l) => l?.name).filter((n): n is string => typeof n === "string");
+    const entry = { lists: parsed.lists, names };
+    memCache.set(userId, entry);
+    return entry;
   } catch {
     return null;
   }
 }
 
-export function writeCachedProfileLists(userId: number, lists: PickableList[]): void {
-  memCache.set(userId, lists);
+export function readCachedProfileLists(userId: number): PickableList[] | null {
+  return readCachedEntry(userId)?.lists ?? null;
+}
+
+/** Names of every known AniList list for this user, including all-private ones. */
+export function readCachedProfileListNames(userId: number): string[] | null {
+  return readCachedEntry(userId)?.names ?? null;
+}
+
+export function writeCachedProfileLists(
+  userId: number,
+  lists: PickableList[],
+  names: string[] = lists.map((l) => l.name),
+): void {
+  memCache.set(userId, { lists, names });
   try {
-    localStorage.setItem(profileListsCacheKey(userId), JSON.stringify({ at: Date.now(), lists }));
+    localStorage.setItem(
+      profileListsCacheKey(userId),
+      JSON.stringify({ at: Date.now(), lists, names }),
+    );
   } catch {
     /* storage failures keep the in-memory copy */
   }

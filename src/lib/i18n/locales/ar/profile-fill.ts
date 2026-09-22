@@ -252,6 +252,10 @@ const profileFill: Record<string, string> = {
   Finished: "مكتمل",
   Rated: "مُقيَّم",
   "not in your library": "ليست في مكتبتك",
+  "Some lists can no longer be featured. Remove them to save.":
+    "بعض القوائم لم تعد قابلة للتمييز. أزلها لتفعيل الحفظ.",
+  "Could not verify AniList lists. Reopen this picker to try again.":
+    "تعذّر التحقق من قوائم AniList. أعد فتح هذه القائمة للمحاولة مرة أخرى.",
   "1 friend in common": "صديق واحد مشترك",
   "{count} friends in common": "{count} أصدقاء مشتركون",
   "Favourite games": "الألعاب المفضّلة",

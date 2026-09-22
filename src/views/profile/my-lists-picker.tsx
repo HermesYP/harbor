@@ -1,30 +1,29 @@
 import { Check, ChevronDown, ChevronUp, ListVideo, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Poster } from "@/components/poster";
 import { useCustomLists } from "@/lib/custom-lists";
-import { fetchProfileLists } from "@/lib/anilist/lists";
-import { readCachedProfileLists } from "@/lib/anilist/profile-lists";
+import { fetchProfileLists, type ProfileListsResult } from "@/lib/anilist/lists";
 import { useAnilist } from "@/lib/anilist/provider";
 import { useT } from "@/lib/i18n";
-import { currentAuthor } from "@/lib/theme-auth";
+import { currentAuthor, subscribeAuthor } from "@/lib/theme-auth";
 import {
   MAX_FEATURED_LISTS,
   buildFeaturedPayload,
   fetchFeaturedLists,
   readLocalLists,
-  resolveFeaturedClaims,
   saveFeaturedLists,
-  toGhostList,
   toPickableList,
   type FeaturedList,
   type PickableList,
 } from "@/lib/social/featured-lists";
-
-function matchSelection(featured: FeaturedList[], lists: PickableList[]): string[] {
-  // Served order with ghost slots kept in place, so a reload never reorders
-  // the user's featured arrangement and unmatched records stay selectable.
-  return resolveFeaturedClaims(featured, lists).map((claim) => claim.pickId ?? claim.ghostId);
-}
+import {
+  hasUnprovenSelection,
+  isSaveReady,
+  publishableSelection,
+  reconcileFeatured,
+  type FeaturedPrivacy,
+  type LoadedFeaturedFor,
+} from "@/lib/social/featured-reconcile";
 
 function ListRow({
   list,
@@ -153,22 +152,35 @@ function SelectedRow({
 export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   const t = useT();
   const local = useCustomLists();
+  const handle = useSyncExternalStore(subscribeAuthor, currentAuthor)?.handle ?? null;
   const { isConnected: anilistConnected, session: anilistSession } = useAnilist();
   const anilistUserId = anilistConnected ? (anilistSession?.userId ?? null) : null;
-  const [anilist, setAnilist] = useState<PickableList[]>(() =>
-    anilistUserId != null ? (readCachedProfileLists(anilistUserId) ?? []) : [],
+  // AniList candidates only become featureable after a fresh fetch verifies
+  // them; cache fallback (and the pre-settle state) must never look
+  // featureable, so unverified rows stay hidden.
+  const [anilist, setAnilist] = useState<PickableList[]>([]);
+  const [anilistNames, setAnilistNames] = useState<string[]>([]);
+  const [anilistVerified, setAnilistVerified] = useState(false);
+  const lists = useMemo(
+    () => [...local.map(toPickableList), ...(anilistVerified ? anilist : [])],
+    [local, anilist, anilistVerified],
   );
-  const lists = useMemo(() => [...local.map(toPickableList), ...anilist], [local, anilist]);
+  const privacy = useMemo<FeaturedPrivacy>(
+    () => ({ anilistNames, anilistVerified, anilistConnected: anilistUserId != null }),
+    [anilistNames, anilistVerified, anilistUserId],
+  );
   const [selected, setSelected] = useState<string[]>([]);
   const [served, setServed] = useState<FeaturedList[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  // A completed load belongs to one Harbor profile AND one AniList account;
+  // either switch invalidates Save before the next fetch can settle.
+  const [loadedFor, setLoadedFor] = useState<LoadedFeaturedFor | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceUnverified, setSourceUnverified] = useState(false);
 
-  const claims = useMemo(() => resolveFeaturedClaims(served, lists), [served, lists]);
-  const ghosts = useMemo(
-    () => claims.filter((claim) => claim.pickId == null).map(toGhostList),
-    [claims],
+  const { ghosts } = useMemo(
+    () => reconcileFeatured(served, lists, anilistNames),
+    [served, lists, anilistNames],
   );
   const entries = useMemo(() => [...lists, ...ghosts], [lists, ghosts]);
   const ghostIds = useMemo(() => new Set(ghosts.map((g) => g.id)), [ghosts]);
@@ -181,28 +193,59 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
     () => entries.filter((e) => !selected.includes(e.id)),
     [entries, selected],
   );
+  // A selected row whose items may not be republished (e.g. a formerly
+  // featured AniList list that is now all-private) blocks Save; the row's
+  // remove button is the explicit way to drop it from the profile.
+  const blocked = useMemo(
+    () => hasUnprovenSelection(entries, selected, privacy),
+    [entries, selected, privacy],
+  );
+  const overLimit = selected.length > MAX_FEATURED_LISTS;
+  const ready = isSaveReady(loadedFor, handle, anilistUserId, anilistVerified, blocked || overLimit);
 
   useEffect(() => {
-    const handle = currentAuthor()?.handle;
+    // Drop everything derived from the previous account/state before fetching:
+    // while the new fetch is pending (or fails), no candidates, verification,
+    // or selection from the old load may remain featureable.
+    setLoadedFor(undefined);
+    setServed([]);
+    setAnilist([]);
+    setAnilistNames([]);
+    setAnilistVerified(false);
+    setSelected([]);
+    setSourceUnverified(false);
     if (!handle) return;
     const ctrl = new AbortController();
+    const unverified: ProfileListsResult = { lists: [], names: [], verified: false };
     const anilistReady =
       anilistUserId != null
-        ? fetchProfileLists(anilistUserId).catch(() => [])
-        : Promise.resolve([]);
+        ? fetchProfileLists(anilistUserId).catch(() => unverified)
+        : Promise.resolve(unverified);
     Promise.all([fetchFeaturedLists(handle, ctrl.signal), anilistReady])
-      .then(([featured, anilistLists]) => {
+      .then(([featured, profile]) => {
         if (ctrl.signal.aborted) return;
         setServed(featured);
-        setAnilist(anilistLists);
-        const localPick = readLocalLists();
-        const pickable = [...localPick, ...anilistLists];
-        setSelected(matchSelection(featured, pickable));
-        setLoaded(true);
+        setAnilist(profile.lists);
+        setAnilistNames(profile.names);
+        setAnilistVerified(profile.verified);
+        // Only verified AniList lists join the candidates; cached results
+        // and disconnected profiles reconcile against local lists alone.
+        const candidates = [...readLocalLists(), ...(profile.verified ? profile.lists : [])];
+        setSelected(
+          reconcileFeatured(featured, candidates, profile.names).selected,
+        );
+        if (anilistUserId != null && !profile.verified) {
+          // A failed connected fetch cannot authorize republishing possibly
+          // private served rows. Keep them visible and disable Save.
+          setSourceUnverified(true);
+          return;
+        }
+        setSourceUnverified(false);
+        setLoadedFor({ handle, anilistUserId });
       })
       .catch(() => {});
     return () => ctrl.abort();
-  }, [anilistUserId]);
+  }, [handle, anilistUserId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -232,13 +275,12 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   };
 
   const save = async () => {
-    if (!loaded) return;
+    if (!ready || !handle || currentAuthor()?.handle !== handle) return;
     setSaving(true);
     setError(null);
     try {
-      const byId = new Map(entries.map((l) => [l.id, l] as const));
-      const picked = selected.map((id) => byId.get(id)).filter((l): l is PickableList => !!l);
-      await saveFeaturedLists(buildFeaturedPayload(picked, served, lists), true);
+      const picked = publishableSelection(entries, selected, privacy);
+      await saveFeaturedLists(buildFeaturedPayload(picked, served, lists, anilistNames), true, handle);
       onClose?.();
     } catch {
       setError(t("Could not save. Try again."));
@@ -322,6 +364,23 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
               )}
             </>
           )}
+          {blocked && (
+            <p className="text-[13px] text-danger">
+              {t("Some lists can no longer be featured. Remove them to save.")}
+            </p>
+          )}
+          {overLimit && (
+            <p className="text-[13px] text-danger">
+              {t("Pick up to {max} lists to show on your public profile.", {
+                max: MAX_FEATURED_LISTS,
+              })}
+            </p>
+          )}
+          {sourceUnverified && (
+            <p className="text-[13px] text-danger">
+              {t("Could not verify AniList lists. Reopen this picker to try again.")}
+            </p>
+          )}
           {error && <p className="text-[13px] text-danger">{error}</p>}
         </div>
 
@@ -338,7 +397,7 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
             </button>
             <button
               onClick={() => void save()}
-              disabled={saving || !loaded}
+              disabled={saving || !ready}
               className="inline-flex min-h-11 items-center gap-2 rounded-[10px] bg-accent px-5 text-[14px] font-semibold text-canvas transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               <Check size={20} /> {saving ? t("Saving") : t("Save")}

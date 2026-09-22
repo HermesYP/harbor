@@ -97,12 +97,25 @@ export async function fetchSharedList(
   return lists.find((l) => l.id === listId) ?? null;
 }
 
+// The backend schema lives outside this repository and may reject unknown
+// fields. Keep provenance for client-side identity/privacy checks, but do not
+// rely on it round-tripping through the featured-lists PATCH response.
+export function featuredWirePayload(lists: FeaturedList[]): Array<Omit<FeaturedList, "source">> {
+  return lists.map(({ source: _source, ...record }) => record);
+}
+
 export async function saveFeaturedLists(
   lists: FeaturedList[],
   clear = false,
+  expectedHandle?: string,
 ): Promise<FeaturedList[]> {
   const baked = lists.length > 0 ? await bakeDefaultPosters(lists) : lists;
-  const body: Record<string, unknown> = { featuredLists: baked };
+  // Poster baking is async: do not PATCH another Harbor profile if it changed
+  // while this save was in flight.
+  if (expectedHandle && currentAuthor()?.handle !== expectedHandle) {
+    throw new Error("featured-list owner changed during save");
+  }
+  const body: Record<string, unknown> = { featuredLists: featuredWirePayload(baked) };
   if (clear) body.clearFeaturedLists = true;
   const res = await safeFetch(`${BASE}/me/profile`, {
     method: "PATCH",
@@ -124,7 +137,7 @@ export async function unfeatureListByName(
   if (!handle || !target) return;
   const served = await fetchFeaturedLists(handle);
   const kept = keptFeaturedAfterUnfeature(served, name, source, proofItems);
-  if (kept.length !== served.length) await saveFeaturedLists(kept, true);
+  if (kept.length !== served.length) await saveFeaturedLists(kept, true, handle);
 }
 
 export function listShareUrl(handle: string, listId: string): string {

@@ -97,17 +97,19 @@ function contentProvesOrigin(
  *   field is independent provenance and needs no content proof for a sole
  *   candidate). Same-name twins within one source are only told apart by
  *   content proof, and only when that singles one candidate out.
- * - A record without provenance matches by name only when a single source
- *   offers that name AND that pick's content proves it produced the record;
- *   anything weaker leaves the record a ghost instead of letting it be
- *   silently adopted (and later overwritten) by a same-name list.
+ * - A record without provenance matches by name only when its content proves
+ *   the source; known AniList names also veto local adoption, even when the
+ *   old server record has a non-tracker id. Anything weaker stays a ghost
+ *   instead of being silently adopted by a same-name list.
  * - Each pick and each server id is claimed at most once; unmatched records
  *   stay ghosts that keep their content and identity.
  */
 export function resolveFeaturedClaims(
   served: FeaturedList[],
   picks: PickableList[],
+  knownAnilistNames: string[] = [],
 ): FeaturedClaim[] {
+  const known = new Set(knownAnilistNames.map(normalizeListName));
   const claimed = new Set<string>();
   return served.map((record, index) => {
     const ghostId = GHOST_ID_PREFIX + (record.id || `#${index}`);
@@ -115,6 +117,13 @@ export function resolveFeaturedClaims(
     let candidates = picks.filter((p) => !claimed.has(p.id) && normalizeListName(p.name) === key);
     if (record.source) {
       candidates = candidates.filter((p) => p.source === record.source);
+    } else if (known.has(key)) {
+      // A legacy row bearing a remembered AniList name may have been deleted,
+      // renamed, or rewritten by the server. Never let a same-name local list
+      // adopt it; a live AniList candidate still needs full content proof.
+      candidates = candidates.filter(
+        (p) => p.source === "anilist" && contentProvesOrigin(record, p.items, p.source),
+      );
     } else {
       const sources = new Set(candidates.map((p) => p.source ?? "unknown"));
       if (sources.size > 1) {
@@ -164,8 +173,9 @@ export function buildFeaturedPayload(
   selected: PickableList[],
   served: FeaturedList[],
   allPicks: PickableList[],
+  knownAnilistNames: string[] = [],
 ): FeaturedList[] {
-  const claims = resolveFeaturedClaims(served, allPicks);
+  const claims = resolveFeaturedClaims(served, allPicks, knownAnilistNames);
   const recordByGhostId = new Map<string, FeaturedList>();
   const servedIdByPickId = new Map<string, string>();
   for (const claim of claims) {
