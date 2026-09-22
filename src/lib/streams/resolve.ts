@@ -1,5 +1,6 @@
 import { safeFetch as fetch } from "@/lib/safe-fetch";
 import { dwarn } from "@/lib/debug";
+import { remoteStreamServerUrl } from "@/lib/stremio-server";
 import { completedTorrentDownloadFor } from "@/lib/download/downloads-store";
 import { hasUncachedMarker, isP2pStream } from "./cached";
 import {
@@ -23,6 +24,7 @@ import {
 import {
   directTorrentEnabled,
   engineP2pEligible,
+  isHostedTorrentServerUrl,
   isVideoFile,
   localTorrentAllowed,
   trackersFromSources,
@@ -30,6 +32,7 @@ import {
 } from "@/lib/torrent/stremio-stream";
 import type { ParsedStream, ScoredStream } from "./types";
 import { matchEpisodeFileIndex, type EpisodeHint } from "./episode-file";
+import { fileIdxFromUrlForHash } from "@/lib/torrent/magnet";
 
 export type ResolveResult =
   | { ok: true; data: DirectLink; via: string; readiness?: LinkReadiness }
@@ -108,6 +111,21 @@ export async function resolveStream(
     if (direct) return { ok: true, data: direct, via: "p2p" };
     if (signal.aborted) return { ok: false, code: "aborted", tried };
     return { ok: false, code: engineFailureCode(), tried };
+  }
+
+  // Avoid overloaded hosted torrent servers when local P2P fallback is allowed.
+  // This beta's engine helper is local-only: don't bypass a configured remote
+  // server. Keep the addon URL available if the local engine declines.
+  if (
+    allowP2pFallback &&
+    !remoteStreamServerUrl() &&
+    stream.infoHash &&
+    isHostedTorrentServerUrl(stream.url) &&
+    engineP2pEligible(stream)
+  ) {
+    const direct = await tryTorrentEngine(stream, signal, hint);
+    if (direct) return { ok: true, data: direct, via: "p2p" };
+    if (signal.aborted) return { ok: false, code: "aborted", tried };
   }
 
   if (stream.url && stream.url !== "#") {
@@ -324,8 +342,36 @@ async function tryLocalEngine(
   hint?: EpisodeHint,
 ): Promise<DirectLink | null> {
   if (!stream.infoHash || !localTorrentAllowed() || signal.aborted) return null;
-  const addIdx =
-    typeof stream.fileIdx === "number" && stream.fileIdx >= 0 ? stream.fileIdx : undefined;
+  // Streams parsed from addons normally carry fileIdx already, but a hosted
+  // torrent-server url can still name the intended file when it went missing —
+  // and addon parsing may have already copied that URL's index into fileIdx.
+  // Treat any index the hosted URL backs as URL-derived and verify it against
+  // the engine's actual file list before selecting: only such urls follow the
+  // /<hash>/<idx> contract, and only the engine knows which idxes exist. An
+  // explicit fileIdx that differs from the hosted URL (or has no trustworthy
+  // URL) is the addon's own choice and keeps its pre-existing semantics: the
+  // engine may decline it rather than silently guess another file. A foreign
+  // hash, malformed index, or URL-backed index absent from the file list falls
+  // back to the episode/largest guess.
+  const ownIdx =
+    typeof stream.fileIdx === "number" &&
+    Number.isSafeInteger(stream.fileIdx) &&
+    stream.fileIdx >= 0
+      ? stream.fileIdx
+      : undefined;
+  const urlIdx = isHostedTorrentServerUrl(stream.url)
+    ? fileIdxFromUrlForHash(stream.url, stream.infoHash)
+    : undefined;
+  const urlBackedIdx = urlIdx != null && (ownIdx == null || ownIdx === urlIdx) ? urlIdx : undefined;
+  // librqbit validates AddTorrentOptions.only_files against the metadata it
+  // fetches inside add_torrent and fails the WHOLE add on an out-of-range id
+  // (librqbit 8.1.1 session.rs: "file id N is out of range"), so a URL-backed
+  // index that has not met the engine's file list must not narrow the add —
+  // it would abort before the membership fallback below can ever run. Only a
+  // genuinely explicit fileIdx narrows at add time (unchanged semantics); the
+  // URL-backed index is verified and applied via torrent_engine_select once
+  // the metadata — and therefore the real file list — exists.
+  const addIdx = urlBackedIdx != null ? undefined : ownIdx;
   const added = await torrentEngineAdd(
     magnetFromHash(stream.infoHash),
     trackersFromSources(stream.sources),
@@ -337,8 +383,14 @@ async function tryLocalEngine(
   try {
     if (added.files.length === 0 || signal.aborted) return null;
     const filename = stream.behaviorHints?.filename ?? stream.behaviorHints?.fileName ?? null;
-    let chosenIdx = stream.fileIdx;
-    if (chosenIdx == null || chosenIdx < 0) {
+    let chosenIdx: number | undefined;
+    if (urlBackedIdx != null) {
+      const backIdx = urlBackedIdx;
+      chosenIdx = added.files.some((f) => f.idx === backIdx) ? backIdx : undefined;
+    } else {
+      chosenIdx = ownIdx;
+    }
+    if (chosenIdx == null) {
       const season = hint?.season ?? stream.season;
       const episode = hint?.episode ?? stream.episode;
       chosenIdx = selectEngineFileIdx(added.files, season, episode);

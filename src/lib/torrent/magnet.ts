@@ -86,8 +86,22 @@ export function infoHashFromUrl(url: string): { infoHash: string; fileIdx?: numb
   const fileIdx = m[2] != null ? Number(m[2]) : undefined;
   return {
     infoHash: m[1].toLowerCase(),
-    fileIdx: fileIdx != null && Number.isFinite(fileIdx) ? fileIdx : undefined,
+    fileIdx: fileIdx != null && Number.isSafeInteger(fileIdx) && fileIdx >= 0 ? fileIdx : undefined,
   };
+}
+
+// A torrent-server url can carry the intended file index even when the stream's
+// own fileIdx is missing. Inherit it only when the url's 40-hex hash matches the
+// stream's infoHash and the index is a safe non-negative integer; a foreign hash
+// or malformed index must never pick the file.
+export function fileIdxFromUrlForHash(
+  url: string | null | undefined,
+  infoHash: string | null | undefined,
+): number | undefined {
+  if (!url || !infoHash) return undefined;
+  const parsed = infoHashFromUrl(url);
+  if (!parsed || parsed.infoHash !== infoHash.toLowerCase()) return undefined;
+  return parsed.fileIdx;
 }
 
 export function infoHashFromSources(sources?: string[]): string | null {
@@ -110,7 +124,9 @@ function base32ToHex(input: string): string | null {
   }
   let hex = "";
   for (let i = 0; i + 8 <= bits.length; i += 8) {
-    hex += parseInt(bits.slice(i, i + 8), 2).toString(16).padStart(2, "0");
+    hex += parseInt(bits.slice(i, i + 8), 2)
+      .toString(16)
+      .padStart(2, "0");
   }
   return hex.length === 40 ? hex : null;
 }

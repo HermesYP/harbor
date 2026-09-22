@@ -4,7 +4,8 @@ import { dlog, dwarn } from "@/lib/debug";
 import { isAddonRanked, isStatusOnlyAddon } from "./addon-detect";
 import type { AddonRankFn } from "./addon-priority";
 import { hasUncachedMarker } from "./cached";
-import { infoHashFromSources, infoHashFromUrl } from "@/lib/torrent/magnet";
+import { fileIdxFromUrlForHash, infoHashFromSources, infoHashFromUrl } from "@/lib/torrent/magnet";
+import { isHostedTorrentServerUrl } from "@/lib/torrent/stremio-stream";
 import type { Stream } from "./types";
 
 const TIMEOUT_MS_FAST = 8000;
@@ -315,14 +316,20 @@ async function fetchOne(
           addonUrl: addon.transportUrl,
           addonRanked: ranked,
         };
+        const fromUrl = s.url ? infoHashFromUrl(s.url) : null;
         if (!mapped.infoHash && hasUncachedMarker(s)) {
-          const fromUrl = s.url ? infoHashFromUrl(s.url) : null;
           const hash = fromUrl?.infoHash ?? infoHashFromSources(s.sources);
-          if (hash) {
-            mapped.infoHash = hash;
-            if (mapped.fileIdx == null && fromUrl?.fileIdx != null)
-              mapped.fileIdx = fromUrl.fileIdx;
-          }
+          if (hash) mapped.infoHash = hash;
+        }
+        // The addon may already know the infoHash while a hosted torrent-server
+        // url still names the intended file. Only such urls follow the
+        // /<hash>/<idx> contract — an arbitrary url (e.g. /proxy/<hash>/2) may
+        // carry unrelated path segments. Inherit the index only when the url's
+        // hash matches the stream's own hash; never override an explicit
+        // fileIdx, and never trust a malformed index.
+        if (mapped.fileIdx == null && mapped.infoHash && isHostedTorrentServerUrl(s.url)) {
+          const urlIdx = fileIdxFromUrlForHash(s.url, mapped.infoHash);
+          if (urlIdx != null) mapped.fileIdx = urlIdx;
         }
         return mapped;
       });
@@ -367,6 +374,38 @@ function dedupeStreams(streams: Stream[]): Stream[] {
     if (s.sources && s.sources.length > 0) {
       const merged = new Set([...(prior.sources ?? []), ...s.sources]);
       prior.sources = [...merged];
+    }
+    // URL-index normalization can map two representations of the same
+    // torrent+file onto one key (an explicit fileIdx and a hosted-URL-derived
+    // one). Keep the first stream as primary — its identity and transport URL
+    // decide how the stream is scored and played — but carry over facts the
+    // duplicate has and the primary lacks instead of dropping them: a URL only
+    // when the primary has none (never swapping transports), positive cached
+    // flags (true wins, so the merge is independent of response order), and
+    // behaviorHints keys the primary is missing.
+    if (prior.url == null && s.url != null) prior.url = s.url;
+    const priorCached = (prior as { cached?: Partial<Record<string, boolean>> }).cached;
+    const dupCached = (s as { cached?: Partial<Record<string, boolean>> }).cached;
+    if (dupCached) {
+      let mergedCached: Partial<Record<string, boolean>> | undefined;
+      for (const [slug, v] of Object.entries(dupCached)) {
+        if (v === true && priorCached?.[slug] !== true) {
+          (mergedCached ??= { ...priorCached })[slug] = true;
+        }
+      }
+      if (mergedCached)
+        (prior as { cached?: Partial<Record<string, boolean>> }).cached = mergedCached;
+    }
+    if (s.behaviorHints) {
+      const hints: NonNullable<Stream["behaviorHints"]> = { ...prior.behaviorHints };
+      let filled = false;
+      for (const [k, v] of Object.entries(s.behaviorHints)) {
+        if (v !== undefined && hints[k] === undefined) {
+          hints[k] = v;
+          filled = true;
+        }
+      }
+      if (filled) prior.behaviorHints = hints;
     }
   }
   return [...seen.values()];

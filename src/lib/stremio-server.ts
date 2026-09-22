@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export const BUNDLED_SERVER_URL = "http://127.0.0.1:11470";
+export const DEFAULT_BUNDLED_PORT = 11470;
+export const BUNDLED_SERVER_URL = `http://127.0.0.1:${DEFAULT_BUNDLED_PORT}`;
 const PROBE_TIMEOUT_MS = 1500;
 const PROBE_TTL_MS = 30_000;
 const READY_WAIT_POLL_MS = 250;
@@ -23,7 +24,9 @@ export function remoteStreamServerStrict(): boolean {
   try {
     const raw = localStorage.getItem("harbor.settings");
     if (!raw) return false;
-    return (JSON.parse(raw) as { remoteStreamServerStrict?: boolean }).remoteStreamServerStrict === true;
+    return (
+      (JSON.parse(raw) as { remoteStreamServerStrict?: boolean }).remoteStreamServerStrict === true
+    );
   } catch {
     return false;
   }
@@ -106,7 +109,12 @@ export async function probeStremioServer(force = false, base?: string): Promise<
 }
 
 async function httpProbe(force: boolean, base: string): Promise<boolean> {
-  if (!force && probeCache && probeCache.base === base && Date.now() - probeCache.at < PROBE_TTL_MS) {
+  if (
+    !force &&
+    probeCache &&
+    probeCache.base === base &&
+    Date.now() - probeCache.at < PROBE_TTL_MS
+  ) {
     return probeCache.ok;
   }
   try {
