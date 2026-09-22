@@ -1,9 +1,11 @@
 import { Check, ChevronDown, ChevronUp, ListVideo, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Poster } from "@/components/poster";
 import { useCustomLists } from "@/lib/custom-lists";
+import { fetchProfileLists, type ProfileListsResult } from "@/lib/anilist/lists";
+import { useAnilist } from "@/lib/anilist/provider";
 import { useT } from "@/lib/i18n";
-import { currentAuthor } from "@/lib/theme-auth";
+import { currentAuthor, subscribeAuthor } from "@/lib/theme-auth";
 import {
   MAX_FEATURED_LISTS,
   buildFeaturedPayload,
@@ -14,24 +16,14 @@ import {
   type FeaturedList,
   type PickableList,
 } from "@/lib/social/featured-lists";
-
-function normName(value: string): string {
-  return value.replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
-}
-
-function matchSelection(featured: FeaturedList[], lists: PickableList[]): string[] {
-  const byName = new Map<string, string>();
-  for (const list of lists) {
-    const key = normName(list.name);
-    if (!byName.has(key)) byName.set(key, list.id);
-  }
-  const ids: string[] = [];
-  for (const f of featured) {
-    const id = byName.get(normName(f.name));
-    if (id && !ids.includes(id)) ids.push(id);
-  }
-  return ids.slice(0, MAX_FEATURED_LISTS);
-}
+import {
+  hasUnprovenSelection,
+  isSaveReady,
+  publishableSelection,
+  reconcileFeatured,
+  type FeaturedPrivacy,
+  type LoadedFeaturedFor,
+} from "@/lib/social/featured-reconcile";
 
 function ListRow({
   list,
@@ -73,7 +65,12 @@ function ListRow({
       <div className="flex shrink-0 gap-1">
         {list.items.slice(0, 4).map((item) => (
           <div key={item.id} className="w-8">
-            <Poster src={item.poster || undefined} seed={item.name || item.id} ratio="portrait" className="rounded-[6px]" />
+            <Poster
+              src={item.poster || undefined}
+              seed={item.name || item.id}
+              ratio="portrait"
+              className="rounded-[6px]"
+            />
           </div>
         ))}
       </div>
@@ -119,7 +116,9 @@ function SelectedRow({
           <ChevronDown size={16} strokeWidth={2.5} />
         </button>
       </div>
-      <span className="w-4 shrink-0 text-center text-[13px] font-semibold tabular-nums text-ink-subtle">{index + 1}</span>
+      <span className="w-4 shrink-0 text-center text-[13px] font-semibold tabular-nums text-ink-subtle">
+        {index + 1}
+      </span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[14px] font-medium text-ink">{list.name}</div>
         <div className="text-[12px] text-ink-subtle">
@@ -130,7 +129,12 @@ function SelectedRow({
       <div className="flex shrink-0 gap-1">
         {list.items.slice(0, 3).map((item) => (
           <div key={item.id} className="w-8">
-            <Poster src={item.poster || undefined} seed={item.name || item.id} ratio="portrait" className="rounded-[6px]" />
+            <Poster
+              src={item.poster || undefined}
+              seed={item.name || item.id}
+              ratio="portrait"
+              className="rounded-[6px]"
+            />
           </div>
         ))}
       </div>
@@ -148,44 +152,107 @@ function SelectedRow({
 export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   const t = useT();
   const local = useCustomLists();
-  const lists = useMemo(() => local.map(toPickableList), [local]);
+  const handle = useSyncExternalStore(subscribeAuthor, currentAuthor)?.handle ?? null;
+  const { isConnected: anilistConnected, session: anilistSession } = useAnilist();
+  const anilistUserId = anilistConnected ? (anilistSession?.userId ?? null) : null;
+  // AniList candidates only become featureable after a fresh fetch verifies
+  // them; cache fallback (and the pre-settle state) must never look
+  // featureable, so unverified rows stay hidden.
+  const [anilist, setAnilist] = useState<PickableList[]>([]);
+  const [anilistNames, setAnilistNames] = useState<string[]>([]);
+  const [anilistVerified, setAnilistVerified] = useState(false);
+  const lists = useMemo(
+    () => [...local.map(toPickableList), ...(anilistVerified ? anilist : [])],
+    [local, anilist, anilistVerified],
+  );
+  const privacy = useMemo<FeaturedPrivacy>(
+    () => ({ anilistNames, anilistVerified, anilistConnected: anilistUserId != null }),
+    [anilistNames, anilistVerified, anilistUserId],
+  );
   const [selected, setSelected] = useState<string[]>([]);
   const [served, setServed] = useState<FeaturedList[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  // A completed load belongs to one Harbor profile AND one AniList account;
+  // either switch invalidates Save before the next fetch can settle.
+  const [loadedFor, setLoadedFor] = useState<LoadedFeaturedFor | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceUnverified, setSourceUnverified] = useState(false);
 
-  const ghosts = useMemo(() => {
-    const localNames = new Set(lists.map((l) => normName(l.name)));
-    return served
-      .filter((s) => !localNames.has(normName(s.name)))
-      .map((s) => ({ id: "srv:" + s.id, name: s.name, items: s.items }));
-  }, [lists, served]);
+  const { ghosts } = useMemo(
+    () => reconcileFeatured(served, lists, anilistNames),
+    [served, lists, anilistNames],
+  );
   const entries = useMemo(() => [...lists, ...ghosts], [lists, ghosts]);
   const ghostIds = useMemo(() => new Set(ghosts.map((g) => g.id)), [ghosts]);
   const selectedEntries = useMemo(
-    () => selected.map((id) => entries.find((e) => e.id === id)).filter((l): l is PickableList => !!l),
+    () =>
+      selected.map((id) => entries.find((e) => e.id === id)).filter((l): l is PickableList => !!l),
     [selected, entries],
   );
-  const unselectedEntries = useMemo(() => entries.filter((e) => !selected.includes(e.id)), [entries, selected]);
+  const unselectedEntries = useMemo(
+    () => entries.filter((e) => !selected.includes(e.id)),
+    [entries, selected],
+  );
+  // Candidate lists can change while this picker is open. A selected id that
+  // disappears must block Save rather than be omitted from a clear:true PATCH.
+  const missingSelection = selectedEntries.length !== selected.length;
+  // A selected row whose items may not be republished (e.g. a formerly
+  // featured AniList list that is now all-private) also blocks Save; its
+  // remove button is the explicit way to drop it from the profile.
+  const blocked = useMemo(
+    () => hasUnprovenSelection(entries, selected, privacy),
+    [entries, selected, privacy],
+  );
+  const overLimit = selected.length > MAX_FEATURED_LISTS;
+  const ready = isSaveReady(
+    loadedFor,
+    handle,
+    anilistUserId,
+    anilistVerified,
+    blocked || overLimit,
+  );
 
   useEffect(() => {
-    const handle = currentAuthor()?.handle;
+    // Drop everything derived from the previous account/state before fetching:
+    // while the new fetch is pending (or fails), no candidates, verification,
+    // or selection from the old load may remain featureable.
+    setLoadedFor(undefined);
+    setServed([]);
+    setAnilist([]);
+    setAnilistNames([]);
+    setAnilistVerified(false);
+    setSelected([]);
+    setSourceUnverified(false);
     if (!handle) return;
     const ctrl = new AbortController();
-    fetchFeaturedLists(handle, ctrl.signal)
-      .then((featured) => {
+    const unverified: ProfileListsResult = { lists: [], names: [], verified: false };
+    const anilistReady =
+      anilistUserId != null
+        ? fetchProfileLists(anilistUserId).catch(() => unverified)
+        : Promise.resolve(unverified);
+    Promise.all([fetchFeaturedLists(handle, ctrl.signal), anilistReady])
+      .then(([featured, profile]) => {
+        if (ctrl.signal.aborted) return;
         setServed(featured);
-        const localPick = readLocalLists();
-        const localNames = new Set(localPick.map((l) => normName(l.name)));
-        const matched = matchSelection(featured, localPick);
-        const gIds = featured.filter((f) => !localNames.has(normName(f.name))).map((f) => "srv:" + f.id);
-        setSelected([...matched, ...gIds]);
-        setLoaded(true);
+        setAnilist(profile.lists);
+        setAnilistNames(profile.names);
+        setAnilistVerified(profile.verified);
+        // Only verified AniList lists join the candidates; cached results
+        // and disconnected profiles reconcile against local lists alone.
+        const candidates = [...readLocalLists(), ...(profile.verified ? profile.lists : [])];
+        setSelected(reconcileFeatured(featured, candidates, profile.names).selected);
+        if (anilistUserId != null && !profile.verified) {
+          // A failed connected fetch cannot authorize republishing possibly
+          // private served rows. Keep them visible and disable Save.
+          setSourceUnverified(true);
+          return;
+        }
+        setSourceUnverified(false);
+        setLoadedFor({ handle, anilistUserId });
       })
       .catch(() => {});
     return () => ctrl.abort();
-  }, []);
+  }, [handle, anilistUserId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -215,15 +282,16 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   };
 
   const save = async () => {
-    if (!loaded) return;
+    if (!ready || !handle || currentAuthor()?.handle !== handle) return;
     setSaving(true);
     setError(null);
     try {
-      const byId = new Map(entries.map((l) => [l.id, l] as const));
-      const picked = selected
-        .map((id) => byId.get(id))
-        .filter((l): l is PickableList => !!l);
-      await saveFeaturedLists(buildFeaturedPayload(picked, served), true);
+      const picked = publishableSelection(entries, selected, privacy);
+      await saveFeaturedLists(
+        buildFeaturedPayload(picked, served, lists, anilistNames),
+        true,
+        handle,
+      );
       onClose?.();
     } catch {
       setError(t("Could not save. Try again."));
@@ -233,7 +301,11 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[140] flex items-center justify-center p-4" role="dialog" aria-modal>
+    <div
+      className="fixed inset-0 z-[140] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal
+    >
       <button aria-label={t("Close")} className="absolute inset-0 bg-black/55" onClick={onClose} />
       <div className="relative flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-[20px] bg-surface ring-1 ring-edge">
         <div className="flex items-center justify-between border-b border-edge-soft px-6 py-4">
@@ -249,19 +321,25 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
 
         <div className="flex-1 space-y-2 overflow-y-auto px-6 py-5">
           <p className="pb-1 text-[13px] text-ink-muted">
-            {t("Pick up to {max} lists to show on your public profile.", { max: MAX_FEATURED_LISTS })}
+            {t("Pick up to {max} lists to show on your public profile.", {
+              max: MAX_FEATURED_LISTS,
+            })}
           </p>
           {entries.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-[10px] border border-dashed border-edge py-12 text-center">
               <ListVideo size={24} className="text-ink-subtle" />
               <p className="mt-2 text-[14px] text-ink-muted">{t("You have no lists yet")}</p>
-              <p className="mt-1 text-[12px] text-ink-subtle">{t("Create lists in your library to feature them here")}</p>
+              <p className="mt-1 text-[12px] text-ink-subtle">
+                {t("Create lists in your library to feature them here")}
+              </p>
             </div>
           ) : (
             <>
               {selectedEntries.length > 0 && (
                 <div className="space-y-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">{t("Featured order")}</div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
+                    {t("Featured order")}
+                  </div>
                   {selectedEntries.map((list, i) => (
                     <SelectedRow
                       key={list.id}
@@ -279,7 +357,9 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
               {unselectedEntries.length > 0 && (
                 <div className="space-y-2 pt-1">
                   {selectedEntries.length > 0 && (
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">{t("Add a list")}</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-subtle">
+                      {t("Add a list")}
+                    </div>
                   )}
                   {unselectedEntries.map((list) => (
                     <ListRow
@@ -294,6 +374,30 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
                 </div>
               )}
             </>
+          )}
+          {missingSelection ? (
+            <p className="text-[13px] text-danger">
+              {t("Lists changed while this picker was open. Reopen it before saving.")}
+            </p>
+          ) : (
+            blocked && (
+              <div className="space-y-1 text-[13px] text-danger">
+                <p>{t("Some lists can no longer be featured. Remove them to save.")}</p>
+                <p>{t("Removing a list not in your library deletes it from your profile.")}</p>
+              </div>
+            )
+          )}
+          {overLimit && (
+            <p className="text-[13px] text-danger">
+              {t("Pick up to {max} lists to show on your public profile.", {
+                max: MAX_FEATURED_LISTS,
+              })}
+            </p>
+          )}
+          {sourceUnverified && (
+            <p className="text-[13px] text-danger">
+              {t("Could not verify AniList lists. Reopen this picker to try again.")}
+            </p>
           )}
           {error && <p className="text-[13px] text-danger">{error}</p>}
         </div>
@@ -311,7 +415,7 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
             </button>
             <button
               onClick={() => void save()}
-              disabled={saving || !loaded}
+              disabled={saving || !ready}
               className="inline-flex min-h-11 items-center gap-2 rounded-[10px] bg-accent px-5 text-[14px] font-semibold text-canvas transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               <Check size={20} /> {saving ? t("Saving") : t("Save")}

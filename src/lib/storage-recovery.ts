@@ -51,6 +51,7 @@ const PRUNABLE_EXACT = new Set<string>([
 const PRUNABLE_PREFIXES = [
   "harbor.libraryNameRepair.v1.",
   "harbor.anilist.collection.v1.",
+  "harbor.anilist.profilelists.v1.",
   "harbor.manga.cache.v1.",
   "harbor.manga.cache.v2.",
   "harbor.manga.art.",

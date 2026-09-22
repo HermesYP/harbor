@@ -2,19 +2,16 @@ import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { deleteList, renameList, type CustomList } from "@/lib/custom-lists";
+import { readCachedProfileListNames } from "@/lib/anilist/profile-lists";
+import { useAnilist } from "@/lib/anilist/provider";
 import { useT } from "@/lib/i18n";
 import { unfeatureListByName } from "@/lib/social/featured-lists";
 import { AnchoredMenu } from "@/components/anchored-menu";
 import { emitListToast } from "@/components/lists/list-toast";
 
-export function ListSettingsMenu({
-  list,
-  onDeleted,
-}: {
-  list: CustomList;
-  onDeleted: () => void;
-}) {
+export function ListSettingsMenu({ list, onDeleted }: { list: CustomList; onDeleted: () => void }) {
   const t = useT();
+  const { isConnected: anilistConnected, session: anilistSession } = useAnilist();
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -72,7 +69,11 @@ export function ListSettingsMenu({
           onClose={() => setConfirming(false)}
           onConfirm={() => {
             deleteList(list.id);
-            void unfeatureListByName(list.name);
+            const names =
+              anilistConnected && anilistSession?.userId != null
+                ? (readCachedProfileListNames(anilistSession.userId) ?? [])
+                : [];
+            void unfeatureListByName(list.name, "local", list.items, names);
             emitListToast(t('Deleted "{name}"', { name: list.name }));
             setConfirming(false);
             onDeleted();

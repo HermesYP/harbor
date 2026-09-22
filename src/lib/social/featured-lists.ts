@@ -3,46 +3,37 @@ import { authToken, currentAuthor } from "@/lib/theme-auth";
 import { readLists, type CustomList } from "@/lib/custom-lists";
 import { bakeDefaultPosters } from "./featured-posters";
 import { HARBOR_API_BASE } from "@/lib/config/endpoints";
+import { keptFeaturedAfterUnfeature, normalizeListName, type ListSource } from "./list-identity";
 
 export { likeList, unlikeList } from "./list-likes";
 export type { ListLike } from "./list-likes";
+export {
+  GHOST_ID_PREFIX,
+  buildFeaturedPayload,
+  keptFeaturedAfterUnfeature,
+  normalizeListName,
+  resolveFeaturedClaims,
+  toGhostList,
+} from "./list-identity";
+export type {
+  FeaturedClaim,
+  FeaturedItem,
+  FeaturedList,
+  ListSource,
+  PickableList,
+} from "./list-identity";
+import type { FeaturedList, PickableList } from "./list-identity";
 
 const BASE = `${HARBOR_API_BASE}/themes/api/social`;
 
 export const MAX_FEATURED_LISTS = 6;
 export const MAX_FEATURED_ITEMS = 24;
 
-export type FeaturedItem = {
-  id: string;
-  name: string;
-  poster: string;
-  type: string;
-};
-
-export type FeaturedList = {
-  id: string;
-  name: string;
-  items: FeaturedItem[];
-  coverImage?: string;
-  bgImage?: string;
-  bgMode?: string;
-  likeCount?: number;
-  liked?: boolean;
-};
-
-export type PickableList = {
-  id: string;
-  name: string;
-  items: FeaturedItem[];
-  coverImage?: string;
-  bgImage?: string;
-  bgMode?: string;
-};
-
 export function toPickableList(list: CustomList): PickableList {
   return {
     id: list.id,
     name: list.name,
+    source: "local",
     coverImage: list.coverImage,
     bgImage: list.bgImage,
     bgMode: list.bgMode,
@@ -63,34 +54,12 @@ export function toFeaturedList(list: PickableList): FeaturedList {
   return {
     id: "",
     name: list.name,
+    source: list.source,
     items: list.items,
     coverImage: list.coverImage,
     bgImage: list.bgImage,
     bgMode: list.bgMode,
   };
-}
-
-export function normalizeListName(name: string): string {
-  return name.replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
-}
-
-export function buildFeaturedPayload(
-  selected: PickableList[],
-  served: FeaturedList[],
-): FeaturedList[] {
-  const idByName = new Map<string, string>();
-  for (const f of served) {
-    const key = normalizeListName(f.name);
-    if (f.id && !idByName.has(key)) idByName.set(key, f.id);
-  }
-  return selected.map((l) => ({
-    id: idByName.get(normalizeListName(l.name)) ?? "",
-    name: l.name,
-    coverImage: l.coverImage,
-    bgImage: l.bgImage,
-    bgMode: l.bgMode,
-    items: l.items,
-  }));
 }
 
 function authHeaders(): Record<string, string> {
@@ -124,12 +93,25 @@ export async function fetchSharedList(
   return lists.find((l) => l.id === listId) ?? null;
 }
 
+// The backend schema lives outside this repository and may reject unknown
+// fields. Keep provenance for client-side identity/privacy checks, but do not
+// rely on it round-tripping through the featured-lists PATCH response.
+export function featuredWirePayload(lists: FeaturedList[]): Array<Omit<FeaturedList, "source">> {
+  return lists.map(({ source: _source, ...record }) => record);
+}
+
 export async function saveFeaturedLists(
   lists: FeaturedList[],
   clear = false,
+  expectedHandle?: string,
 ): Promise<FeaturedList[]> {
   const baked = lists.length > 0 ? await bakeDefaultPosters(lists) : lists;
-  const body: Record<string, unknown> = { featuredLists: baked };
+  // Poster baking is async: do not PATCH another Harbor profile if it changed
+  // while this save was in flight.
+  if (expectedHandle && currentAuthor()?.handle !== expectedHandle) {
+    throw new Error("featured-list owner changed during save");
+  }
+  const body: Record<string, unknown> = { featuredLists: featuredWirePayload(baked) };
   if (clear) body.clearFeaturedLists = true;
   const res = await safeFetch(`${BASE}/me/profile`, {
     method: "PATCH",
@@ -141,13 +123,27 @@ export async function saveFeaturedLists(
   return echoed.length || lists.length === 0 ? echoed : lists;
 }
 
-export async function unfeatureListByName(name: string): Promise<void> {
+export async function unfeatureListByName(
+  name: string,
+  source?: ListSource,
+  proofItems: Array<{ id: string }> = [],
+  knownAnilistNames: string[] = [],
+): Promise<void> {
   const handle = currentAuthor()?.handle;
   const target = normalizeListName(name);
   if (!handle || !target) return;
   const served = await fetchFeaturedLists(handle);
-  const kept = served.filter((l) => normalizeListName(l.name) !== target);
-  if (kept.length !== served.length) await saveFeaturedLists(kept, true);
+  // Called after the custom list is deleted: the remaining local lists are
+  // competing same-name candidates, never silently remove a surviving twin.
+  const kept = keptFeaturedAfterUnfeature(
+    served,
+    name,
+    source,
+    proofItems,
+    knownAnilistNames,
+    readLocalLists(),
+  );
+  if (kept.length !== served.length) await saveFeaturedLists(kept, true, handle);
 }
 
 export function listShareUrl(handle: string, listId: string): string {

@@ -1,7 +1,7 @@
 const profileFill: Record<string, string> = {
-  "General": "Общие",
-  "Look": "Оформление",
-  "optional": "необязательно",
+  General: "Общие",
+  Look: "Оформление",
+  optional: "необязательно",
   "Your name and the details shown at the top of your profile.":
     "Ваше имя и данные, которые показываются вверху профиля.",
   "Your avatar, banner, and how the whole profile is styled.":
@@ -255,6 +255,14 @@ const profileFill: Record<string, string> = {
   Finished: "Просмотрено",
   Rated: "Оценено",
   "not in your library": "нет в вашей библиотеке",
+  "Some lists can no longer be featured. Remove them to save.":
+    "Часть списков больше нельзя сделать избранной. Удалите их, чтобы сохранить.",
+  "Removing a list not in your library deletes it from your profile.":
+    "Удаление списка, которого нет в вашей библиотеке, удаляет его из вашего профиля.",
+  "Lists changed while this picker was open. Reopen it before saving.":
+    "Списки изменились, пока это окно было открыто. Откройте его заново перед сохранением.",
+  "Could not verify AniList lists. Reopen this picker to try again.":
+    "Не удалось проверить списки AniList. Откройте этот диалог заново и попробуйте снова.",
   "1 friend in common": "1 общий друг",
   "{count} friends in common": "{count} общих друзей",
   "Favourite games": "Любимые игры",
