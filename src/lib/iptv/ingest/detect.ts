@@ -1,20 +1,28 @@
 import type { IptvPlaylistSource } from "../types";
 import type { XtreamCreds } from "../xtream";
-import { credsFromSource } from "./xtream-creds";
+import { isLocalFileUrl, localFilePathFromUrl } from "../local-file.ts";
+import { credsFromSource } from "./xtream-creds.ts";
 
 export type ProviderShape =
   | { kind: "xtream"; creds: XtreamCreds }
-  | { kind: "m3u"; url: string; middleware: boolean }
-  | { kind: "epg"; url: string }
+  | { kind: "m3u"; url: string; middleware: boolean; local?: boolean }
+  | { kind: "epg"; url: string; local?: boolean }
   | { kind: "invalid"; reason: string };
 
 const MIDDLEWARE_PATH_RE = /\/(iptv|m3u|playlist|xmltv|threadfin|xteve)\b/i;
 const RAW_M3U_RE = /\.m3u8?(\?|$)/i;
 
+const BAD_LOCAL_PATH_REASON =
+  "That local path is not an absolute file:// URL. Use the Browse button to pick the file.";
+
 export function detectProviderShape(src: IptvPlaylistSource): ProviderShape {
   if ((src.kind ?? "m3u") === "epg") {
     const url = (src.epgUrl || src.url || "").trim();
     if (!url) return { kind: "invalid", reason: "EPG source has no URL." };
+    if (isLocalFileUrl(url)) {
+      if (!localFilePathFromUrl(url)) return { kind: "invalid", reason: BAD_LOCAL_PATH_REASON };
+      return { kind: "epg", url, local: true };
+    }
     return { kind: "epg", url };
   }
 
@@ -29,10 +37,15 @@ export function detectProviderShape(src: IptvPlaylistSource): ProviderShape {
 
   const url = (src.url || "").trim();
   if (!url) return { kind: "invalid", reason: "Playlist source has no URL." };
+  if (isLocalFileUrl(url)) {
+    if (!localFilePathFromUrl(url)) return { kind: "invalid", reason: BAD_LOCAL_PATH_REASON };
+    return { kind: "m3u", url, middleware: false, local: true };
+  }
   if (!/^https?:\/\//i.test(url)) {
     return {
       kind: "invalid",
-      reason: "That does not look like a playlist URL. Use an http(s) M3U link or Xtream server.",
+      reason:
+        "That does not look like a playlist URL. Use an http(s) M3U link, a local file picked with Browse, or an Xtream server.",
     };
   }
 

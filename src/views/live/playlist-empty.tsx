@@ -11,17 +11,15 @@ import {
   Tv,
 } from "lucide-react";
 import { useT } from "@/lib/i18n";
+import { isSupportedSourceUrl } from "@/lib/iptv/local-file";
 import {
   EMPTY_FORM,
   type PlaylistFormValue,
   type PlaylistKind,
 } from "./source-picker/playlist-form";
+import { BrowseFileButton, M3U_FILE_FILTER, XMLTV_FILE_FILTER } from "./source-picker/browse-file";
 
-export function PlaylistEmpty({
-  onSave,
-}: {
-  onSave: (entry: PlaylistFormValue) => void;
-}) {
+export function PlaylistEmpty({ onSave }: { onSave: (entry: PlaylistFormValue) => void }) {
   const [stage, setStage] = useState<"intro" | "form">("intro");
   return stage === "intro" ? (
     <Intro onContinue={() => setStage("form")} />
@@ -92,15 +90,7 @@ function Intro({ onContinue }: { onContinue: () => void }) {
   );
 }
 
-function Feature({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
+function Feature({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
   return (
     <div className="flex gap-4">
       <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-muted">
@@ -172,7 +162,7 @@ function Form({
   }, [onBack]);
 
   const canSave = (() => {
-    if (kind === "m3u") return /^https?:\/\//i.test(url.trim());
+    if (kind === "m3u") return isSupportedSourceUrl(url);
     if (kind === "xtream") {
       return (
         /^https?:\/\//i.test(server.trim()) &&
@@ -180,7 +170,7 @@ function Form({
         password.trim().length > 0
       );
     }
-    return /^https?:\/\//i.test(epgUrl.trim());
+    return isSupportedSourceUrl(epgUrl);
   })();
 
   const submit = () => {
@@ -281,27 +271,33 @@ function Form({
           {kind === "m3u" && (
             <>
               <Field label={t("Playlist URL")}>
-                <input
-                  ref={firstFieldRef}
-                  type="url"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://example.com/get.php?username=…&password=…&type=m3u_plus"
-                  spellCheck={false}
-                  onKeyDown={(e) => e.key === "Enter" && submit()}
-                  className="h-12 w-full rounded-xl border border-edge-soft/70 bg-canvas/70 px-4 font-mono text-[13px] text-ink placeholder:text-ink-subtle/70 transition-colors focus:border-edge focus:outline-none"
-                />
+                <div className="flex items-stretch gap-2">
+                  <input
+                    ref={firstFieldRef}
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://example.com/get.php?username=…&password=…&type=m3u_plus"
+                    spellCheck={false}
+                    onKeyDown={(e) => e.key === "Enter" && submit()}
+                    className="h-12 min-w-0 flex-1 rounded-xl border border-edge-soft/70 bg-canvas/70 px-4 font-mono text-[13px] text-ink placeholder:text-ink-subtle/70 transition-colors focus:border-edge focus:outline-none"
+                  />
+                  <BrowseFileButton filter={M3U_FILE_FILTER} onPick={setUrl} />
+                </div>
               </Field>
               <Field label={t("EPG URL")} hint={t("Optional")}>
-                <input
-                  type="url"
-                  value={epgUrl}
-                  onChange={(e) => setEpgUrl(e.target.value)}
-                  placeholder="https://example.com/xmltv.php?username=…&password=…"
-                  spellCheck={false}
-                  onKeyDown={(e) => e.key === "Enter" && submit()}
-                  className="h-12 w-full rounded-xl border border-edge-soft/70 bg-canvas/70 px-4 font-mono text-[13px] text-ink placeholder:text-ink-subtle/70 transition-colors focus:border-edge focus:outline-none"
-                />
+                <div className="flex items-stretch gap-2">
+                  <input
+                    type="url"
+                    value={epgUrl}
+                    onChange={(e) => setEpgUrl(e.target.value)}
+                    placeholder="https://example.com/xmltv.php?username=…&password=…"
+                    spellCheck={false}
+                    onKeyDown={(e) => e.key === "Enter" && submit()}
+                    className="h-12 min-w-0 flex-1 rounded-xl border border-edge-soft/70 bg-canvas/70 px-4 font-mono text-[13px] text-ink placeholder:text-ink-subtle/70 transition-colors focus:border-edge focus:outline-none"
+                  />
+                  <BrowseFileButton filter={XMLTV_FILE_FILTER} onPick={setEpgUrl} />
+                </div>
               </Field>
             </>
           )}
@@ -351,16 +347,19 @@ function Form({
 
           {kind === "epg" && (
             <Field label={t("EPG / XMLTV URL")}>
-              <input
-                ref={firstFieldRef}
-                type="url"
-                value={epgUrl}
-                onChange={(e) => setEpgUrl(e.target.value)}
-                placeholder="https://example.com/epg.xml"
-                spellCheck={false}
-                onKeyDown={(e) => e.key === "Enter" && submit()}
-                className="h-12 w-full rounded-xl border border-edge-soft/70 bg-canvas/70 px-4 font-mono text-[13px] text-ink placeholder:text-ink-subtle/70 transition-colors focus:border-edge focus:outline-none"
-              />
+              <div className="flex items-stretch gap-2">
+                <input
+                  ref={firstFieldRef}
+                  type="url"
+                  value={epgUrl}
+                  onChange={(e) => setEpgUrl(e.target.value)}
+                  placeholder="https://example.com/epg.xml"
+                  spellCheck={false}
+                  onKeyDown={(e) => e.key === "Enter" && submit()}
+                  className="h-12 min-w-0 flex-1 rounded-xl border border-edge-soft/70 bg-canvas/70 px-4 font-mono text-[13px] text-ink placeholder:text-ink-subtle/70 transition-colors focus:border-edge focus:outline-none"
+                />
+                <BrowseFileButton filter={XMLTV_FILE_FILTER} onPick={setEpgUrl} />
+              </div>
             </Field>
           )}
 

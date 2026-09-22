@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCachedEpg, loadEpg, subscribeEpg } from "@/lib/iptv/epg-store";
 import { deriveEpgUrls } from "@/lib/iptv/m3u";
 import { findCurrent } from "@/lib/iptv/xmltv";
@@ -7,6 +7,7 @@ import type { EpgIndex, EpgProgram, IptvPlaylistSource } from "@/lib/iptv/types"
 export function useEpg(
   source: IptvPlaylistSource | null,
   extraUrls: string[] = [],
+  refreshKey = 0,
 ): {
   index: EpgIndex | null;
   loading: boolean;
@@ -18,8 +19,13 @@ export function useEpg(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const extraKey = extraUrls.join("|");
+  // A refresh bumps refreshKey; only that run forces a reload, so later
+  // source switches keep honoring the normal EPG cache TTL.
+  const lastRefreshKey = useRef(refreshKey);
 
   useEffect(() => {
+    const forced = refreshKey !== lastRefreshKey.current;
+    lastRefreshKey.current = refreshKey;
     if (!source) {
       setIndex(null);
       return;
@@ -33,7 +39,7 @@ export function useEpg(
     let cancelled = false;
     setError(null);
     setLoading(true);
-    loadEpg({ playlistId: source.id, urls })
+    loadEpg({ playlistId: source.id, urls, force: forced })
       .then((idx) => {
         if (cancelled) return;
         setIndex(idx);
@@ -54,7 +60,7 @@ export function useEpg(
       unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source?.id, source?.url, source?.epgUrl, extraKey]);
+  }, [source?.id, source?.url, source?.epgUrl, extraKey, refreshKey]);
 
   return { index, loading, error };
 }

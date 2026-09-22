@@ -1,4 +1,5 @@
 import type { EpgChannelMeta, EpgProgram, XmltvParseResult } from "./types";
+import { isLocalFileUrl, readLocalTextFile } from "./local-file.ts";
 
 const MAX_BYTES = 200 * 1024 * 1024;
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -37,6 +38,16 @@ export async function fetchAndParseXmltv(
   url: string,
   onProgress?: (programs: EpgProgram[], channelMeta: Map<string, EpgChannelMeta>) => void,
 ): Promise<XmltvParseResult> {
+  if (isLocalFileUrl(url)) {
+    // Local XMLTV file: bounded read, no network, no derived paths.
+    console.info(`[epg] read local file ${url}`);
+    const text = await readLocalTextFile(url, MAX_BYTES);
+    const out = parseXmltv(text);
+    console.info(
+      `[epg] parsed ${out.programs.length} programs, ${out.channelMeta.size} channel defs (local file) from ${url}`,
+    );
+    return out;
+  }
   const ac = new AbortController();
   let stallTimer: ReturnType<typeof setTimeout> | null = null;
   const armStall = () => {

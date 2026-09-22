@@ -147,7 +147,7 @@ export function commitHydratedPlaylist(src: IptvPlaylistSource, channels: IptvCh
 }
 
 const CONNECT_TIMEOUT_S = 30;
-const PARSE_LIMIT_BYTES = 80 * 1024 * 1024;
+export const PARSE_LIMIT_BYTES = 80 * 1024 * 1024;
 
 export async function fetchM3uText(url: string): Promise<string> {
   let res: Response;
@@ -169,7 +169,9 @@ export async function fetchM3uText(url: string): Promise<string> {
     throw new Error("Playlist server returned an empty body");
   }
   if (text.length > PARSE_LIMIT_BYTES) {
-    throw new Error(`Playlist is too large (${(text.length / 1024 / 1024).toFixed(1)} MB). 80 MB limit.`);
+    throw new Error(
+      `Playlist is too large (${(text.length / 1024 / 1024).toFixed(1)} MB). 80 MB limit.`,
+    );
   }
   return text;
 }
