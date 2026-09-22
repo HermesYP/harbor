@@ -23,9 +23,14 @@ export function isHttpUrl(url: string): boolean {
   return /^https?:\/\//i.test(url.trim());
 }
 
-/** Source URLs the IPTV forms may save: remote http(s) or a picked local file. */
+/**
+ * Source URLs the IPTV forms may save: remote http(s) or a picked local file.
+ * A `file://` URL must resolve through the same `localFilePathFromUrl` check
+ * the loader uses, so host-form (`file://host/path`), bare/relative, and
+ * malformed-encoding inputs are refused at Save time instead of failing later.
+ */
 export function isSupportedSourceUrl(url: string): boolean {
-  return isHttpUrl(url) || isLocalFileUrl(url);
+  return isHttpUrl(url) || localFilePathFromUrl(url) !== null;
 }
 
 function encodePathSegments(path: string): string {

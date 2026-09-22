@@ -12,10 +12,15 @@ import {
 } from "../src/lib/iptv/local-file.ts";
 import { detectProviderShape } from "../src/lib/iptv/ingest/detect.ts";
 import { deriveEpgUrls, parseM3u } from "../src/lib/iptv/m3u.ts";
-import { fetchAndParseXmltv, indexProgramsByChannel, parseXmltv } from "../src/lib/iptv/xmltv.ts";
+import {
+  fetchAndParseXmltv,
+  indexProgramsByChannel,
+  localFileLogLabel,
+  parseXmltv,
+} from "../src/lib/iptv/xmltv.ts";
 import type { IptvPlaylistSource } from "../src/lib/iptv/types.ts";
 
-test("source validation accepts http(s) and absolute file:// only", () => {
+test("source validation accepts http(s) and resolvable absolute file:// only", () => {
   assert.equal(isSupportedSourceUrl("https://example.com/list.m3u"), true);
   assert.equal(isSupportedSourceUrl("http://example.com/list.m3u"), true);
   assert.equal(isSupportedSourceUrl("file:///C:/iptv/list.m3u"), true);
@@ -27,6 +32,19 @@ test("source validation accepts http(s) and absolute file:// only", () => {
   assert.equal(isSupportedSourceUrl("/home/me/list.m3u"), false);
   assert.equal(isSupportedSourceUrl("ftp://example.com/list.m3u"), false);
   assert.equal(isSupportedSourceUrl("javascript:alert(1)"), false);
+
+  // Save-time validation uses the same resolver as the loader: every file://
+  // form readLocalTextFile would refuse is refused here too, instead of being
+  // saved only to fail on load.
+  assert.equal(isSupportedSourceUrl("file://"), false);
+  assert.equal(isSupportedSourceUrl("file://nas/list.m3u"), false);
+  assert.equal(isSupportedSourceUrl("file://list.m3u"), false);
+  assert.equal(isSupportedSourceUrl("file:///C:/bad%2.m3u"), false);
+
+  // Picker-produced shapes (encoded Windows, POSIX, UNC) remain accepted.
+  assert.equal(isSupportedSourceUrl("file:///C:/Users/Me/My%20List.m3u"), true);
+  assert.equal(isSupportedSourceUrl("file:///home/me/guide.xml"), true);
+  assert.equal(isSupportedSourceUrl("file:////nas/tv/list.m3u"), true);
 });
 
 test("file:// URLs round-trip picker paths on Windows, POSIX, and UNC", () => {
@@ -191,6 +209,38 @@ test("parseM3u preserves channel and url-tvg references exactly as written", () 
 
 test("fetchAndParseXmltv routes file:// sources to the local reader, not the network", async () => {
   await assert.rejects(fetchAndParseXmltv("file:///C:/iptv/guide.xml"), /desktop app/);
+});
+
+test("local XMLTV logs redact the directory but keep the file name and counts", async () => {
+  const logs: string[] = [];
+  const originalInfo = console.info;
+  console.info = (...args: unknown[]): void => {
+    logs.push(args.map(String).join(" "));
+  };
+  try {
+    await assert.rejects(
+      fetchAndParseXmltv("file:///C:/Users/Secret/Guide Dir/guide.xml"),
+      /desktop app/,
+    );
+  } finally {
+    console.info = originalInfo;
+  }
+
+  // The pre-read log carries no absolute path — only the file name.
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /^\[epg\] read local file file:\/\/…\/guide\.xml$/);
+  assert.ok(!logs[0].includes("Secret"), logs[0]);
+  assert.ok(!logs[0].includes("Guide Dir"), logs[0]);
+
+  // The post-parse log shares the same label and retains its diagnostics
+  // (program/channel counts come from parseXmltv output around it).
+  const label = localFileLogLabel("file:///home/me/secret/guide.xml");
+  assert.equal(label, "file://…/guide.xml");
+  const unc = localFileLogLabel("file:////nas/tv/guide.xml");
+  assert.equal(unc, "file://…/guide.xml");
+  // Unresolvable file:// forms leak nothing either.
+  assert.equal(localFileLogLabel("file://nas/guide.xml"), "file://…");
+  assert.equal(localFileLogLabel("https://example.com/guide.xml"), "file://…");
 });
 
 test("local XMLTV text parses into an indexed guide", () => {

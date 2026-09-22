@@ -1,9 +1,20 @@
 import type { EpgChannelMeta, EpgProgram, XmltvParseResult } from "./types";
-import { isLocalFileUrl, readLocalTextFile } from "./local-file.ts";
+import { isLocalFileUrl, localFilePathFromUrl, readLocalTextFile } from "./local-file.ts";
 
 const MAX_BYTES = 200 * 1024 * 1024;
 const CONNECT_TIMEOUT_MS = 30_000;
 const STALL_TIMEOUT_MS = 25_000;
+
+/**
+ * Log label for a local XMLTV source: keeps the file name (still useful when
+ * comparing guides) without the absolute directory path, which must not reach
+ * the console.
+ */
+export function localFileLogLabel(url: string): string {
+  const path = localFilePathFromUrl(url);
+  const name = path ? path.split(/[\\/]/).filter(Boolean).pop() : undefined;
+  return name ? `file://…/${name}` : "file://…";
+}
 
 async function iptvFetch(url: string, signal: AbortSignal): Promise<Response> {
   if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -40,11 +51,14 @@ export async function fetchAndParseXmltv(
 ): Promise<XmltvParseResult> {
   if (isLocalFileUrl(url)) {
     // Local XMLTV file: bounded read, no network, no derived paths.
-    console.info(`[epg] read local file ${url}`);
+    // Absolute local paths stay out of the log; the file name is enough to
+    // tell guides apart.
+    const label = localFileLogLabel(url);
+    console.info(`[epg] read local file ${label}`);
     const text = await readLocalTextFile(url, MAX_BYTES);
     const out = parseXmltv(text);
     console.info(
-      `[epg] parsed ${out.programs.length} programs, ${out.channelMeta.size} channel defs (local file) from ${url}`,
+      `[epg] parsed ${out.programs.length} programs, ${out.channelMeta.size} channel defs (local file) from ${label}`,
     );
     return out;
   }
