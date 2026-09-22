@@ -1,5 +1,6 @@
 import { useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { PlayerBridge, PlayerSnapshot } from "@/lib/player/bridge";
+import { ZOOM_STEP } from "@/lib/player/video-fill";
 import type { PlayEpisode } from "@/lib/view";
 import { useClipRecorder } from "./use-clip-recorder";
 import { useFrameGrab } from "./use-frame-grab";
@@ -111,8 +112,8 @@ export function usePlayerHotkeys(params: {
     onGifRecord: quickToolsEnabled ? () => gif.toggle() : undefined,
     onClipRecord: quickToolsEnabled ? () => clip.openChooser() : undefined,
     onToggleCrop: () => videoFill.cycle(),
-    onPanscanUp: () => videoFill.step(0.1),
-    onPanscanDown: () => videoFill.step(-0.1),
+    onPanscanUp: () => videoFill.step(ZOOM_STEP),
+    onPanscanDown: () => videoFill.step(-ZOOM_STEP),
     onPrevChannel: liveOverlay.isLive ? liveOverlay.goPrevChannel : undefined,
     onToggleAnime4k,
     onAnime4kOn,
