@@ -20,10 +20,7 @@ const hookSource = readFileSync(
   "utf8",
 );
 
-const HOOK_URL = new URL(
-  "../src/views/player/hooks/use-auto-end-exit.ts",
-  import.meta.url,
-).href;
+const HOOK_URL = new URL("../src/views/player/hooks/use-auto-end-exit.ts", import.meta.url).href;
 const REACT_HOST_URL = new URL("./shims/react-hook-host.mjs", import.meta.url).href;
 const CLOCK_STUB_URL = new URL("./shims/playback-clock-stub.mjs", import.meta.url).href;
 const SRC_ROOT_URL = new URL("../src/", import.meta.url);
@@ -122,7 +119,9 @@ function mockEndTimers(t: TimerContext) {
  * only in holdForEndRecommendations — exactly the transition useTitleDetail
  * drives (loading=false -> loading=true -> settles empty).
  */
-function makeBaseProps(closePlayer: () => void): Omit<AutoEndExitParams, "holdForEndRecommendations"> {
+function makeBaseProps(
+  closePlayer: () => void,
+): Omit<AutoEndExitParams, "holdForEndRecommendations"> {
   return {
     src: {
       meta: { id: "tt0111111", type: "movie", name: "EOF Race" },
