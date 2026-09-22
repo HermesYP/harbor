@@ -11,7 +11,7 @@ import { SPOILER_TEXT_CLASS, SPOILER_THUMB_CLASS, type SpoilerMask } from "@/lib
 import { useView } from "@/lib/view";
 import { useLocalAwareSeriesPlay } from "@/lib/local-library/use-series-play";
 import { useT } from "@/lib/i18n";
-import { prefetchSegments } from "@/lib/skip-intro";
+import { prefetchSegments, skipPrefetchEnabled } from "@/lib/skip-intro";
 import { NewBadge, UpcomingBadge } from "./badges";
 import { EpisodeDownloadButton } from "./episode-download-button";
 import { isNewEpisode, isUpcomingEpisode } from "./helpers";
@@ -39,6 +39,7 @@ export function EpisodeRow({
   const { openEpisodeDetail } = useView();
   const playEpisodeLocalAware = useLocalAwareSeriesPlay();
   const { settings } = useSettings();
+  const skipPrefetchOn = skipPrefetchEnabled(settings);
   const ratingValue = ep.imdbRating ?? ep.voteAverage;
   const ratingIsImdb = ep.imdbRating != null;
   const tmdbStill = ep.stillPath
@@ -81,7 +82,7 @@ export function EpisodeRow({
       data-ep={ep.episodeNumber}
       data-no-card-ring
       onContextMenu={(e) => onContextMenu?.(e, ep.seasonNumber, ep.episodeNumber, progress.watched)}
-      onMouseEnter={() => prefetchSegments(meta, playEpisode)}
+      onMouseEnter={() => prefetchSegments(meta, playEpisode, skipPrefetchOn)}
       className="group flex gap-6 rounded-2xl px-4 py-5 transition-colors hover:bg-elevated/30"
     >
       <button
@@ -97,7 +98,7 @@ export function EpisodeRow({
             videos: cinemetaVideos,
           })
         }
-        onFocus={() => prefetchSegments(meta, playEpisode)}
+        onFocus={() => prefetchSegments(meta, playEpisode, skipPrefetchOn)}
         className="flex min-w-0 flex-1 gap-6 text-start"
       >
         <div className="relative w-[200px] shrink-0 overflow-hidden rounded-lg">

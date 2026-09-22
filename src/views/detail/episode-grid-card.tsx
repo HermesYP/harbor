@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { EpisodeRatingBadge } from "./episode-rating-badge";
 import { Poster } from "@/components/poster";
 import type { Meta } from "@/lib/cinemeta";
-import { prefetchSegments } from "@/lib/skip-intro";
+import { prefetchSegments, skipPrefetchEnabled } from "@/lib/skip-intro";
 import { formatAirDate } from "@/lib/dates";
 import { useT } from "@/lib/i18n";
 import { useView } from "@/lib/view";
@@ -38,6 +38,7 @@ export function EpisodeGridCard({
 }) {
   const t = useT();
   const { settings } = useSettings();
+  const skipPrefetchOn = skipPrefetchEnabled(settings);
   const cardMeta = g.meta ?? meta;
   const [imgIdx, setImgIdx] = useState(0);
   useEffect(() => setImgIdx(0), [g.key]);
@@ -55,7 +56,7 @@ export function EpisodeGridCard({
   const enter = () => {
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setPreview(true), HOVER_DELAY);
-    prefetchSegments(cardMeta, { season: g.season, episode: g.number });
+    prefetchSegments(cardMeta, { season: g.season, episode: g.number }, skipPrefetchOn);
   };
   const leave = () => {
     window.clearTimeout(timer.current);
@@ -83,7 +84,9 @@ export function EpisodeGridCard({
         data-no-card-ring
         onClick={() => g.play({ resume: partial })}
         onContextMenu={ctx}
-        onFocus={() => prefetchSegments(cardMeta, { season: g.season, episode: g.number })}
+        onFocus={() =>
+          prefetchSegments(cardMeta, { season: g.season, episode: g.number }, skipPrefetchOn)
+        }
         className="flex w-full flex-col gap-2.5 text-start"
       >
         <div className="relative aspect-video overflow-hidden rounded-xl">

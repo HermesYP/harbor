@@ -7,10 +7,12 @@ import { fingerprint } from "./fingerprint";
 import { fetchAniSkipSegments, kitsuToMal } from "./aniskip";
 import { chaptersToSegments } from "./chapters";
 import { fetchIntroDbSegments } from "./theintrodb";
+import { prefetchSkipSegments } from "./prefetch";
 import type { SkipSegment } from "./types";
 import { getLocalCache } from "../simkl/activities";
 
 export type { SkipSegment, SkipKind, SkipSource } from "./types";
+export { skipPrefetchEnabled, type SkipPrefetchSettings } from "./prefetch";
 
 const MIN_OUTRO_START_FRACTION = 0.5;
 const MAX_SEGMENT_SEC = 360;
@@ -161,43 +163,46 @@ export function useAdSegments(
   return segs;
 }
 
-export function activeSegment(
-  segments: SkipSegment[],
-  positionSec: number,
-): SkipSegment | null {
+export function activeSegment(segments: SkipSegment[], positionSec: number): SkipSegment | null {
   for (const s of segments) {
     if (positionSec >= s.startSec && positionSec < s.endSec - 0.75) return s;
   }
   return null;
 }
 
-export function prefetchSegments(meta: Meta, episode?: PlayEpisode): void {
-  const kitsuId = parseKitsuId(meta.id);
-  const epNum = episode?.episode;
+export function prefetchSegments(
+  meta: Meta,
+  episode: PlayEpisode | undefined,
+  enabled: boolean,
+): void {
+  prefetchSkipSegments(enabled, {
+    aniskip: () => {
+      const kitsuId = parseKitsuId(meta.id);
+      const epNum = episode?.episode;
+      if (kitsuId == null || epNum == null) return;
+      kitsuToMal(kitsuId)
+        .then((malId) => {
+          if (malId != null) return fetchAniSkipSegments(malId, epNum, 0);
+        })
+        .catch(() => {});
+    },
+    introDb: () => {
+      const resolvedExternalId = resolveAnimeToExternalId(meta.id);
+      const introDbId =
+        meta.id.startsWith("tt") || meta.id.startsWith("tmdb:")
+          ? meta.id
+          : episode?.imdbId && episode.imdbId.startsWith("tt")
+            ? episode.imdbId
+            : resolvedExternalId || meta.id;
 
-  if (kitsuId != null && epNum != null) {
-    kitsuToMal(kitsuId)
-      .then((malId) => {
-        if (malId != null) return fetchAniSkipSegments(malId, epNum, 0);
-      })
-      .catch(() => {});
-  }
-
-  const resolvedExternalId = resolveAnimeToExternalId(meta.id);
-  const introDbId =
-    meta.id.startsWith("tt") || meta.id.startsWith("tmdb:")
-      ? meta.id
-      : episode?.imdbId && episode.imdbId.startsWith("tt")
-        ? episode.imdbId
-        : resolvedExternalId || meta.id;
-
-  if (introDbId.startsWith("tmdb:") || introDbId.startsWith("tt")) {
-    const introSeason = episode?.imdbSeason ?? episode?.season;
-    const introEpisode = episode?.imdbEpisode ?? episode?.episode;
-    const ep =
-      introSeason != null && introEpisode != null
-        ? { season: introSeason, episode: introEpisode }
-        : undefined;
-    fetchIntroDbSegments(introDbId, ep, 0).catch(() => {});
-  }
+      if (!introDbId.startsWith("tmdb:") && !introDbId.startsWith("tt")) return;
+      const introSeason = episode?.imdbSeason ?? episode?.season;
+      const introEpisode = episode?.imdbEpisode ?? episode?.episode;
+      const ep =
+        introSeason != null && introEpisode != null
+          ? { season: introSeason, episode: introEpisode }
+          : undefined;
+      fetchIntroDbSegments(introDbId, ep, 0).catch(() => {});
+    },
+  });
 }
