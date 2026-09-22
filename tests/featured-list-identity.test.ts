@@ -23,12 +23,22 @@ function items(prefix: string, count = 1) {
   }));
 }
 
-function localList(id: string, name: string): PickableList {
-  return { id, name, source: "local", items: items(id) };
+/** Tracker-style ids (shared vocabulary: AniList picks always use these). */
+function malItems(prefix: string, count = 1) {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `mal:${prefix}${i}`,
+    name: `${prefix} ${i}`,
+    poster: `https://img.test/mal-${prefix}-${i}.jpg`,
+    type: "series",
+  }));
 }
 
-function anilistList(id: string, name: string): PickableList {
-  return { id, name, source: "anilist", items: items(id) };
+function localList(id: string, name: string, listItems = items(id)): PickableList {
+  return { id, name, source: "local", items: listItems };
+}
+
+function anilistList(id: string, name: string, listItems = malItems(id)): PickableList {
+  return { id, name, source: "anilist", items: listItems };
 }
 
 function record(id: string, name: string, over: Partial<FeaturedList> = {}): FeaturedList {
@@ -89,8 +99,8 @@ test("legacy: an unattributed same-name collision is preserved as a safe ghost",
 test("legacy: one same-name source with matching content keeps the historical binding", () => {
   const served = [
     record("S1", "One", { source: "local", items: items("L1") }),
-    record("S2", "Watching", { items: items("A1") }), // snapshot of the AniList list
-    record("S3", "Watching", { items: items("A1") }),
+    record("S2", "Watching", { items: malItems("A1") }), // snapshot of the AniList list
+    record("S3", "Watching", { items: malItems("A1") }),
   ];
   const picks = [localList("L1", "One"), anilistList("A1", "Watching")];
   const claims = resolveFeaturedClaims(served, picks);
@@ -102,17 +112,69 @@ test("legacy: one same-name source with matching content keeps the historical bi
   assert.deepEqual(payload.map((p) => p.id), ["S2", "S3"]);
 });
 
+test("collision: same-source same-name twins bind only the content-proven one", () => {
+  // e.g. an AniList status "Watching" and a custom list named "Watching"
+  const statusTwin = anilistList("anilist:status:CURRENT", "Watching", malItems("s"));
+  const customTwin = anilistList("anilist:custom:watching", "Watching", malItems("c"));
+  const twins = [statusTwin, customTwin];
+  // record content matches the custom list only: bind that one, not the first
+  const served = [record("S1", "Watching", { source: "anilist", items: malItems("c") })];
+  assert.equal(resolveFeaturedClaims(served, twins)[0].pickId, "anilist:custom:watching");
+  // content matching neither twin fails closed instead of reusing the id
+  const unmatched = [record("S2", "Watching", { source: "anilist", items: malItems("z") })];
+  assert.equal(resolveFeaturedClaims(unmatched, twins)[0].pickId, null);
+  // two identical twins cannot be told apart at all -> ghost
+  const clones = [
+    anilistList("t1", "Watching", malItems("same")),
+    anilistList("t2", "Watching", malItems("same")),
+  ];
+  const shared = [record("S3", "Watching", { source: "anilist", items: malItems("same") })];
+  assert.equal(resolveFeaturedClaims(shared, clones)[0].pickId, null);
+});
+
 test("legacy: name alone never binds — unproven records stay ghosts", () => {
   // e.g. the owner renamed or deleted their AniList list; only a same-name
   // local list remains. Without content proof the record must not be adopted
   // (and republished) through the local list.
-  const snapshot = record("S1", "Watching", { items: items("anilist-snapshot") });
+  const snapshot = record("S1", "Watching", { items: malItems("snap") });
   const picks = [localList("L1", "Watching")];
   const claims = resolveFeaturedClaims([snapshot], picks);
   assert.equal(claims[0].pickId, null);
   assert.equal(claims[0].ghostId, GHOST_ID_PREFIX + "S1");
   const payload = buildFeaturedPayload(picks, [snapshot], picks);
   assert.equal(payload[0].id, "");
+});
+
+test("legacy: full containment is required — one-item overlap is not proof", () => {
+  const snapshot = record("S1", "Watching", { items: malItems("r", 2) }); // mal:r0, mal:r1
+  // shares exactly one item with the record (the old 50% rule accepted this)
+  const anilist = anilistList("A1", "Watching", [malItems("r")[0], malItems("x")[0]]);
+  assert.equal(resolveFeaturedClaims([snapshot], [anilist])[0].pickId, null);
+});
+
+test("legacy: an empty record fails closed — never adopted, never deleted", () => {
+  const empty = record("S1", "Watching", { items: [] });
+  const local = localList("L1", "Watching");
+  assert.equal(resolveFeaturedClaims([empty], [local])[0].pickId, null);
+  assert.deepEqual(keptFeaturedAfterUnfeature([empty], "Watching", "local", local.items), [empty]);
+});
+
+test("legacy: tracker-id content never proves local origin, even when identical", () => {
+  // a local list saved from a shared list holds the exact same MAL ids as the
+  // formerly-AniList record: identical content must not prove local origin
+  const twin = malItems("twin", 2);
+  const snapshot = record("S1", "Watching", { items: twin });
+  const local = localList("L1", "Watching", twin);
+  assert.equal(resolveFeaturedClaims([snapshot], [local])[0].pickId, null);
+  assert.deepEqual(keptFeaturedAfterUnfeature([snapshot], "Watching", "local", twin), [snapshot]);
+});
+
+test("legacy: local-exclusive content keeps the historical local binding", () => {
+  const local = localList("L1", "Watching", [...items("L1", 2), ...items("extra")]);
+  // non-tracker ids can only come from a local list: containment proves it
+  const snapshot = record("S1", "Watching", { items: items("L1", 2) });
+  assert.equal(resolveFeaturedClaims([snapshot], [local])[0].pickId, "L1");
+  assert.deepEqual(keptFeaturedAfterUnfeature([snapshot], "Watching", "local", local.items), []);
 });
 
 test("save: an unselected same-name candidate keeps the legacy ambiguity", () => {
@@ -163,8 +225,8 @@ test("unfeature: scoped deletion fails closed on other sources and unattributed 
   const served = [
     record("S1", "Watching", { source: "local" }),
     record("S2", "Watching", { source: "anilist" }),
-    record("S3", "Watching", { items: items("L1") }), // content proves local origin
-    record("S4", "Watching", { items: items("A2") }), // AniList snapshot without provenance
+    record("S3", "Watching", { items: items("L1") }), // non-tracker content proves local origin
+    record("S4", "Watching", { items: malItems("A2") }), // AniList snapshot without provenance
     record("S5", "Other", { source: "anilist" }),
   ];
   const kept = keptFeaturedAfterUnfeature(served, "Watching", "local", proof);

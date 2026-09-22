@@ -7,9 +7,9 @@
  * a server record is only ever re-associated with a pick from the same source.
  *
  * Records written before provenance existed — including any the backend drops
- * unknown fields for — have no source. Those are adopted by name only when
- * exactly one source offers that name; otherwise the record is preserved
- * verbatim as a ghost so nothing is silently overwritten.
+ * unknown fields for — have no source. Those are adopted only with
+ * source-exclusive content proof and no same-name ambiguity; otherwise the
+ * record is preserved verbatim as a ghost so nothing is silently overwritten.
  */
 
 export type ListSource = "local" | "anilist";
@@ -61,26 +61,45 @@ export function normalizeListName(name: string): string {
 }
 
 /**
- * Content signature used as positive proof of origin for unattributed records:
- * the record was once saved from some list, so most of its items must still be
- * present in that list. Same-name alone is never proof — a renamed or deleted
- * AniList list must not get republished through a same-name local list.
+ * Tracker-style media ids are shared vocabulary: AniList picks always use them
+ * (mal:/anilist:), but local lists can hold the very same ids via saved shared
+ * lists. Non-tracker ids (tt…, tmdb:…) can only come from a local list.
  */
-function contentProvesOrigin(record: FeaturedList, items: Array<{ id: string }>): boolean {
+const TRACKER_ITEM_ID = /^(kitsu|mal|anilist|anidb):/i;
+
+/**
+ * Conservative, source-exclusive origin proof for unattributed records.
+ *
+ * Overlap alone is never proof: the record must be nonempty and FULLY
+ * contained in the candidate list, and the signature must exclude the other
+ * source. Tracker-id content can never prove local origin (a local list may
+ * contain the same MAL/AniList titles), so only an AniList-sourced pick may
+ * adopt it; non-tracker content is impossible for an AniList pick, so it
+ * exclusively proves local origin. Anything else fails closed.
+ */
+function contentProvesOrigin(
+  record: FeaturedList,
+  items: Array<{ id: string }>,
+  source: ListSource | undefined,
+): boolean {
+  if (source == null) return false;
+  if (record.items.length === 0) return false;
   const ids = new Set(items.map((item) => item.id));
-  const recordIds = record.items.map((item) => item.id);
-  if (recordIds.length === 0) return true;
-  const matched = recordIds.filter((id) => ids.has(id)).length;
-  return matched * 2 >= recordIds.length;
+  if (!record.items.every((item) => ids.has(item.id))) return false;
+  const trackerDerived = record.items.every((item) => TRACKER_ITEM_ID.test(item.id));
+  return trackerDerived ? source === "anilist" : source === "local";
 }
 
 /**
  * Resolves each served record to at most one pickable list, in served order.
  *
- * - A record with provenance only matches picks from that source.
+ * - A record with provenance only matches picks from that source (the source
+ *   field is independent provenance and needs no content proof for a sole
+ *   candidate). Same-name twins within one source are only told apart by
+ *   content proof, and only when that singles one candidate out.
  * - A record without provenance matches by name only when a single source
- *   offers that name AND that pick's content still proves it produced the
- *   record; anything weaker leaves the record a ghost instead of letting it be
+ *   offers that name AND that pick's content proves it produced the record;
+ *   anything weaker leaves the record a ghost instead of letting it be
  *   silently adopted (and later overwritten) by a same-name list.
  * - Each pick and each server id is claimed at most once; unmatched records
  *   stay ghosts that keep their content and identity.
@@ -101,11 +120,17 @@ export function resolveFeaturedClaims(
       if (sources.size > 1) {
         candidates = [];
       } else {
-        candidates = candidates.filter((p) => contentProvesOrigin(record, p.items));
+        candidates = candidates.filter((p) => contentProvesOrigin(record, p.items, p.source));
       }
     }
+    // Same-name twins (e.g. an AniList status "Watching" and a custom
+    // "Watching", or two local lists) can only be told apart by content; if
+    // proof does not single one out, fail closed to a ghost.
+    if (candidates.length > 1) {
+      candidates = candidates.filter((p) => contentProvesOrigin(record, p.items, p.source));
+    }
+    if (candidates.length !== 1) return { served: record, pickId: null, ghostId };
     const pick = candidates[0];
-    if (!pick) return { served: record, pickId: null, ghostId };
     claimed.add(pick.id);
     return { served: record, pickId: pick.id, ghostId };
   });
@@ -188,9 +213,9 @@ export function buildFeaturedPayload(
  * source. A record proven to belong to another source is never removed (deleting
  * the local "Watching" must not unfeature the AniList "Watching"), and for a
  * source-scoped unfeature an unattributed legacy record is only removed when
- * `proofItems` show it was saved from this very list — anything unknown fails
- * closed and stays featured. Without a source the historical name-scoped
- * removal applies.
+ * `proofItems` source-exclusively prove it was saved from this very list —
+ * anything unknown fails closed and stays featured. Without a source the
+ * historical name-scoped removal applies.
  */
 export function keptFeaturedAfterUnfeature(
   served: FeaturedList[],
@@ -203,6 +228,6 @@ export function keptFeaturedAfterUnfeature(
     if (normalizeListName(record.name) !== target) return true;
     if (source == null) return false;
     if (record.source != null) return record.source !== source;
-    return !contentProvesOrigin(record, proofItems);
+    return !contentProvesOrigin(record, proofItems, source);
   });
 }

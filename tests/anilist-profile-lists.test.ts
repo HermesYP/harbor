@@ -101,6 +101,19 @@ test("identity: ids derive from AniList keys, never from group order", () => {
   assert.equal(forward.get("best ovas!"), "anilist:custom:best-ovas:2");
 });
 
+test("identity: duplicate identical custom names still get unique stable ids", () => {
+  const lists = buildProfileLists([
+    group({ name: "Same", isCustomList: true, entries: [entry(1, media(95))] }),
+    group({ name: "Same", isCustomList: true, entries: [entry(2, media(96))] }),
+  ]);
+  assert.equal(lists.length, 2);
+  assert.notEqual(lists[0].id, lists[1].id);
+  assert.deepEqual(
+    lists.map((l) => l.id).sort(),
+    ["anilist:custom:same:1", "anilist:custom:same:2"],
+  );
+});
+
 test("mapping: private entries never reach the featured payload", () => {
   const lists = buildProfileLists([
     group({ name: "Secret", isCustomList: true, entries: [entry(1, media(30), true)] }),

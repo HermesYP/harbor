@@ -107,23 +107,34 @@ export function buildProfileLists(groups: ProfileListGroup[]): PickableList[] {
     if (items.length === 0) return;
     built.push({ group, name, items });
   });
-  // Custom lists are keyed by name; slug collisions get a deterministic suffix
-  // (sorted by name) so reordering the response cannot change any list's id.
-  const namesBySlug = new Map<string, string[]>();
-  for (const { group, name } of built) {
-    if (isStatusList(group)) continue;
+  // Custom lists are keyed by name; slug collisions (including duplicate
+  // identical names) get a deterministic rank — sorted by name, input order
+  // for exact ties — so neither reordering the response nor duplicate names
+  // can change or collide with any list's id.
+  const ranks = new Map<number, number>();
+  const bySlug = new Map<string, number[]>();
+  built.forEach(({ group, name }, index) => {
+    if (isStatusList(group)) return;
     const key = slug(name);
-    namesBySlug.set(key, [...(namesBySlug.get(key) ?? []), name]);
+    bySlug.set(key, [...(bySlug.get(key) ?? []), index]);
+  });
+  for (const indices of bySlug.values()) {
+    if (indices.length === 1) continue;
+    const ordered = [...indices].sort((a, b) => {
+      const nameA = built[a].name;
+      const nameB = built[b].name;
+      return nameA < nameB ? -1 : nameA > nameB ? 1 : a - b;
+    });
+    ordered.forEach((builtIndex, rank) => ranks.set(builtIndex, rank + 1));
   }
-  for (const names of namesBySlug.values()) names.sort();
-  return built.map(({ group, name, items }) => {
+  return built.map(({ group, name, items }, index) => {
     let id: string;
     if (isStatusList(group)) {
       id = `anilist:status:${group.status}`;
     } else {
       const key = slug(name);
-      const siblings = namesBySlug.get(key) ?? [name];
-      id = `anilist:custom:${key}` + (siblings.length > 1 ? `:${siblings.indexOf(name) + 1}` : "");
+      const rank = ranks.get(index);
+      id = `anilist:custom:${key}` + (rank != null ? `:${rank}` : "");
     }
     return { id, source: "anilist", name, items };
   });
