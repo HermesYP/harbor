@@ -2,8 +2,8 @@ import { useEffect, useRef, type RefObject } from "react";
 import type { PlayerSnapshot } from "@/lib/player/bridge";
 import { getPlaybackPosition } from "@/lib/player/playback-clock";
 import type { PlayEpisode, PlayerSrc } from "@/lib/view";
+import { createEndExitScheduler } from "./end-exit-scheduler";
 
-const POST_END_DELAY_MS = 800;
 const LIVE_RELOAD_DELAY_MS = 1000;
 const LIVE_RELOAD_WINDOW_MS = 15000;
 const LIVE_RELOAD_MAX = 5;
@@ -34,11 +34,14 @@ export function useAutoEndExit(params: {
     reloadLive,
     closePlayer,
   } = params;
-  const firedForRef = useRef<string | null>(null);
+  // Owns the close timer across effect runs: the effect cleanup cancels a
+  // pending timer, but only a timer that actually fires marks the source as
+  // closed, so a cancelled schedule re-arms when the effect re-runs.
+  const schedulerRef = useRef(createEndExitScheduler());
   const reloadTimesRef = useRef<number[]>([]);
 
   useEffect(() => {
-    firedForRef.current = null;
+    schedulerRef.current.reset();
     reloadTimesRef.current = [];
   }, [src.url]);
 
@@ -69,12 +72,16 @@ export function useAutoEndExit(params: {
     if (holdForEndRecommendations) return;
     if (!isLive && startedNearEndRef.current) return;
     if ((canChangeEpisode || roomGuest) && nextEp) return;
-    if (firedForRef.current === src.url) return;
-    firedForRef.current = src.url;
-    const t = window.setTimeout(() => {
+    // A hold/suspend/next-episode gate above cancels the pending timer via
+    // this cleanup; re-running the effect below must be able to re-arm it
+    // (e.g. a natural EOF whose title-detail request settles empty after a
+    // transient loading hold), while a close that already fired never
+    // schedules again for this source.
+    const armed = schedulerRef.current.schedule(src.url, () => {
       void closePlayer();
-    }, POST_END_DELAY_MS);
-    return () => window.clearTimeout(t);
+    });
+    if (!armed) return;
+    return () => schedulerRef.current.cancel();
   }, [
     snap.status,
     snap.errorCode,
