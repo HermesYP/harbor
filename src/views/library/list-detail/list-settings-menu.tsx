@@ -72,7 +72,7 @@ export function ListSettingsMenu({
           onClose={() => setConfirming(false)}
           onConfirm={() => {
             deleteList(list.id);
-            void unfeatureListByName(list.name);
+            void unfeatureListByName(list.name, "local", list.items);
             emitListToast(t('Deleted "{name}"', { name: list.name }));
             setConfirming(false);
             onDeleted();

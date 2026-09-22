@@ -77,10 +77,14 @@ function groupName(group: ProfileListGroup): string {
  * Maps raw AniList list groups to pickable profile lists.
  * Private entries are dropped so featuring a list never publishes rows the
  * owner marked private on AniList, and each media appears at most once per list.
+ *
+ * Identity must survive collection reorders and status-list renames, so it
+ * derives from AniList's own keys — the status for status lists, the name for
+ * custom lists — never from the group's position in the response.
  */
 export function buildProfileLists(groups: ProfileListGroup[]): PickableList[] {
-  const out: PickableList[] = [];
-  groups.forEach((group, index) => {
+  const built: Array<{ group: ProfileListGroup; name: string; items: FeaturedItem[] }> = [];
+  groups.forEach((group) => {
     const name = groupName(group);
     if (!name) return;
     const items: FeaturedItem[] = [];
@@ -101,12 +105,35 @@ export function buildProfileLists(groups: ProfileListGroup[]): PickableList[] {
       if (items.length >= PROFILE_LIST_MAX_ITEMS) break;
     }
     if (items.length === 0) return;
-    out.push({ id: `anilist:${index}:${slug(name)}`, name, items });
+    built.push({ group, name, items });
   });
-  return out;
+  // Custom lists are keyed by name; slug collisions get a deterministic suffix
+  // (sorted by name) so reordering the response cannot change any list's id.
+  const namesBySlug = new Map<string, string[]>();
+  for (const { group, name } of built) {
+    if (isStatusList(group)) continue;
+    const key = slug(name);
+    namesBySlug.set(key, [...(namesBySlug.get(key) ?? []), name]);
+  }
+  for (const names of namesBySlug.values()) names.sort();
+  return built.map(({ group, name, items }) => {
+    let id: string;
+    if (isStatusList(group)) {
+      id = `anilist:status:${group.status}`;
+    } else {
+      const key = slug(name);
+      const siblings = namesBySlug.get(key) ?? [name];
+      id = `anilist:custom:${key}` + (siblings.length > 1 ? `:${siblings.indexOf(name) + 1}` : "");
+    }
+    return { id, source: "anilist", name, items };
+  });
 }
 
-const CACHE_PREFIX = "harbor.anilist.profilelists.v1.";
+function isStatusList(group: ProfileListGroup): boolean {
+  return !group.isCustomList && group.status != null;
+}
+
+const CACHE_PREFIX = "harbor.anilist.profilelists.v2.";
 const memCache = new Map<number, PickableList[]>();
 
 export function profileListsCacheKey(userId: number): string {

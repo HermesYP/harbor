@@ -12,28 +12,18 @@ import {
   buildFeaturedPayload,
   fetchFeaturedLists,
   readLocalLists,
+  resolveFeaturedClaims,
   saveFeaturedLists,
+  toGhostList,
   toPickableList,
   type FeaturedList,
   type PickableList,
 } from "@/lib/social/featured-lists";
 
-function normName(value: string): string {
-  return value.replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 40);
-}
-
 function matchSelection(featured: FeaturedList[], lists: PickableList[]): string[] {
-  const byName = new Map<string, string>();
-  for (const list of lists) {
-    const key = normName(list.name);
-    if (!byName.has(key)) byName.set(key, list.id);
-  }
-  const ids: string[] = [];
-  for (const f of featured) {
-    const id = byName.get(normName(f.name));
-    if (id && !ids.includes(id)) ids.push(id);
-  }
-  return ids.slice(0, MAX_FEATURED_LISTS);
+  // Served order with ghost slots kept in place, so a reload never reorders
+  // the user's featured arrangement and unmatched records stay selectable.
+  return resolveFeaturedClaims(featured, lists).map((claim) => claim.pickId ?? claim.ghostId);
 }
 
 function ListRow({
@@ -175,12 +165,11 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ghosts = useMemo(() => {
-    const localNames = new Set(lists.map((l) => normName(l.name)));
-    return served
-      .filter((s) => !localNames.has(normName(s.name)))
-      .map((s) => ({ id: "srv:" + s.id, name: s.name, items: s.items }));
-  }, [lists, served]);
+  const claims = useMemo(() => resolveFeaturedClaims(served, lists), [served, lists]);
+  const ghosts = useMemo(
+    () => claims.filter((claim) => claim.pickId == null).map(toGhostList),
+    [claims],
+  );
   const entries = useMemo(() => [...lists, ...ghosts], [lists, ghosts]);
   const ghostIds = useMemo(() => new Set(ghosts.map((g) => g.id)), [ghosts]);
   const selectedEntries = useMemo(
@@ -208,12 +197,7 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
         setAnilist(anilistLists);
         const localPick = readLocalLists();
         const pickable = [...localPick, ...anilistLists];
-        const localNames = new Set(pickable.map((l) => normName(l.name)));
-        const matched = matchSelection(featured, pickable);
-        const gIds = featured
-          .filter((f) => !localNames.has(normName(f.name)))
-          .map((f) => "srv:" + f.id);
-        setSelected([...matched, ...gIds]);
+        setSelected(matchSelection(featured, pickable));
         setLoaded(true);
       })
       .catch(() => {});
@@ -254,7 +238,7 @@ export function MyListsPicker({ onClose }: { onClose?: () => void }) {
     try {
       const byId = new Map(entries.map((l) => [l.id, l] as const));
       const picked = selected.map((id) => byId.get(id)).filter((l): l is PickableList => !!l);
-      await saveFeaturedLists(buildFeaturedPayload(picked, served), true);
+      await saveFeaturedLists(buildFeaturedPayload(picked, served, lists), true);
       onClose?.();
     } catch {
       setError(t("Could not save. Try again."));

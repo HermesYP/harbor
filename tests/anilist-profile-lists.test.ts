@@ -68,7 +68,37 @@ test("mapping: custom lists use their AniList name and movies map to movie type"
   assert.equal(lists.length, 1);
   assert.equal(lists[0].name, "Best OVAs");
   assert.equal(lists[0].items[0].type, "movie");
-  assert.match(lists[0].id, /^anilist:\d+:best-ovas$/);
+  assert.match(lists[0].id, /^anilist:custom:best-ovas$/);
+});
+
+test("mapping: lists carry AniList provenance for source-aware featured matching", () => {
+  const lists = buildProfileLists([
+    group({ status: "CURRENT", entries: [entry(1, media(80))] }),
+    group({ name: "Mine", isCustomList: true, entries: [entry(2, media(81))] }),
+  ]);
+  assert.equal(lists[0].source, "anilist");
+  assert.equal(lists[1].source, "anilist");
+});
+
+test("identity: ids derive from AniList keys, never from group order", () => {
+  const groups = [
+    group({ status: "CURRENT", entries: [entry(1, media(90))] }),
+    group({ name: "Best OVAs", isCustomList: true, entries: [entry(2, media(91))] }),
+    group({ name: "best ovas!", isCustomList: true, entries: [entry(3, media(92))] }),
+  ];
+  const idByName = (lists: ReturnType<typeof buildProfileLists>) =>
+    new Map(lists.map((l) => [l.name, l.id]));
+  const forward = idByName(buildProfileLists(groups));
+  const reversed = idByName(buildProfileLists([...groups].reverse()));
+  assert.deepEqual(forward, reversed);
+  // status lists stay identical even when renamed
+  const renamed = buildProfileLists([
+    group({ status: "CURRENT", name: "Currently Watching", entries: [entry(1, media(90))] }),
+  ]);
+  assert.equal(renamed[0].id, forward.get("Watching"));
+  // slug-colliding custom names get deterministic, distinct suffixes
+  assert.equal(forward.get("Best OVAs"), "anilist:custom:best-ovas:1");
+  assert.equal(forward.get("best ovas!"), "anilist:custom:best-ovas:2");
 });
 
 test("mapping: private entries never reach the featured payload", () => {
