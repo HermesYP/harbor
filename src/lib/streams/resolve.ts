@@ -23,6 +23,7 @@ import {
 import {
   directTorrentEnabled,
   engineP2pEligible,
+  isHostedTorrentServerUrl,
   isVideoFile,
   localTorrentAllowed,
   trackersFromSources,
@@ -108,6 +109,16 @@ export async function resolveStream(
     if (direct) return { ok: true, data: direct, via: "p2p" };
     if (signal.aborted) return { ok: false, code: "aborted", tried };
     return { ok: false, code: engineFailureCode(), tried };
+  }
+
+  // A P2P addon url can point at Stremio's hosted torrent server, which may
+  // answer with an overload error Harbor cannot control. Prefer Harbor's own
+  // engine, but deliberately do NOT return engineFailureCode() here: the addon
+  // url must stay reachable when the engine declines or is opted out.
+  if (stream.infoHash && isHostedTorrentServerUrl(stream.url) && engineP2pEligible(stream)) {
+    const direct = await tryTorrentEngine(stream, signal, hint);
+    if (direct) return { ok: true, data: direct, via: "p2p" };
+    if (signal.aborted) return { ok: false, code: "aborted", tried };
   }
 
   if (stream.url && stream.url !== "#") {

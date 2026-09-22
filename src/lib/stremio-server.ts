@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export const BUNDLED_SERVER_URL = "http://127.0.0.1:11470";
+export const DEFAULT_BUNDLED_PORT = 11470;
+export const BUNDLED_SERVER_URL = `http://127.0.0.1:${DEFAULT_BUNDLED_PORT}`;
 const PROBE_TIMEOUT_MS = 1500;
 const PROBE_TTL_MS = 30_000;
 const READY_WAIT_POLL_MS = 250;
