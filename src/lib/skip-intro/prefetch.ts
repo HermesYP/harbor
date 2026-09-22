@@ -1,18 +1,23 @@
 import type { Settings } from "../settings/types";
 
-// Avoid optional background requests (and provider challenges) when skip features are off.
+// Speculative background requests are gated separately from UI visibility.
+// showSkipButton only controls the in-player Skip pill, which is fed by the
+// on-demand playback fetch, so it must not grant prefetch permission here.
 export type SkipPrefetchSettings = Pick<
   Settings,
-  "showSkipButton" | "autoSkipIntro" | "autoSkipRecap" | "autoSkipOutro"
+  "autoSkipIntro" | "autoSkipRecap" | "autoSkipOutro"
 >;
 
+/**
+ * Returns whether background provider warm-up is permitted. Only the
+ * auto-skip settings count: showSkipButton defaults to true, so including it
+ * would fire IntroDB requests for every default user on detail-page mount and
+ * episode hover, re-triggering the Cloudflare challenge from
+ * harborstremio/harbor#1187 without benefiting the Skip button, which
+ * playback fetches on demand through useSkipSegments.
+ */
 export function skipPrefetchEnabled(settings: SkipPrefetchSettings): boolean {
-  return (
-    settings.showSkipButton ||
-    settings.autoSkipIntro ||
-    settings.autoSkipRecap ||
-    settings.autoSkipOutro
-  );
+  return settings.autoSkipIntro || settings.autoSkipRecap || settings.autoSkipOutro;
 }
 
 export type SkipPrefetchProviders = {
