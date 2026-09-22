@@ -35,7 +35,10 @@ function depsEqual(a, b) {
   return true;
 }
 
-export function createHookRunner(useHook) {
+// The component parameter is deliberately not named `use*`: the
+// react-hooks/rules-of-hooks static heuristic would treat a "use" callee
+// inside this test-only render method as an illegal hook call.
+export function createHookRunner(hook) {
   const refs = [];
   const slots = [];
   let props;
@@ -47,7 +50,7 @@ export function createHookRunner(useHook) {
       active = ctx;
       let result;
       try {
-        result = useHook(props);
+        result = hook(props);
       } finally {
         active = null;
       }

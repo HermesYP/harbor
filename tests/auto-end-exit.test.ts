@@ -63,7 +63,7 @@ registerHooks({
 
 const { useAutoEndExit } = (await import(HOOK_URL)) as AutoEndExitModule;
 const { createHookRunner } = (await import(REACT_HOST_URL)) as {
-  createHookRunner: (useHook: AutoEndExitHook) => {
+  createHookRunner: (hook: AutoEndExitHook) => {
     render: (props: AutoEndExitParams) => void;
     unmount: () => void;
   };
