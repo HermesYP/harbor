@@ -24,7 +24,7 @@ import { isAddonRanked } from "@/lib/streams/addon-detect";
 
 import { useScrollMemory, useView, type PlayEpisode, type PlayerSrc } from "@/lib/view";
 import { torrentsDisabled } from "@/lib/torrent/stremio-stream";
-import { prefetchSegments } from "@/lib/skip-intro";
+import { prefetchSegments, skipPrefetchEnabled } from "@/lib/skip-intro";
 
 import { exitWindowFullscreen } from "@/lib/fullscreen-state";
 import { useWindowFullscreen } from "@/lib/use-window-fullscreen";
@@ -105,9 +105,10 @@ export function PlayPicker({
   } = useTogether();
   const inSession = roomSnapshot.state === "joined";
   const resolvedImdb = useImdbId(meta, settings.tmdbKey);
+  const skipPrefetchOn = skipPrefetchEnabled(settings);
   useEffect(() => {
-    prefetchSegments(meta, episode);
-  }, [meta, episode]);
+    prefetchSegments(meta, episode, skipPrefetchOn);
+  }, [meta, episode, skipPrefetchOn]);
   // Warm the player chunk while the best source resolves, so the lazy
   // PlayerView mounts instantly instead of flashing a blank screen.
   useEffect(() => {

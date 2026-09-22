@@ -82,7 +82,7 @@ import { openUrl } from "@/lib/window";
 import { profileFromDetail, trackEvent } from "@/lib/discover";
 import { MOVIE_GENRES, TV_GENRES } from "@/lib/feed/tags";
 import { useScrollMemory, useView, type PlayEpisode } from "@/lib/view";
-import { prefetchSegments } from "@/lib/skip-intro";
+import { prefetchSegments, skipPrefetchEnabled } from "@/lib/skip-intro";
 import { useT } from "@/lib/i18n";
 import { queryKeys } from "@/lib/query";
 import { AddToListMenu } from "@/components/lists/add-to-list-menu";
@@ -1002,6 +1002,8 @@ export function DetailView({
     return { season: candidates[0].season, episode: candidates[0].episode };
   }, [meta.id, detail?.imdbId, detail?.id, libraryItem, isAnime, episodeHint]);
 
+  const skipPrefetchOn = skipPrefetchEnabled(settings);
+
   useEffect(() => {
     if (loading) return;
     let targetEp: PlayEpisode | undefined;
@@ -1034,8 +1036,17 @@ export function DetailView({
         if (v) targetEp.imdbId = v.id;
       }
     }
-    prefetchSegments(playMeta, targetEp);
-  }, [loading, isSeries, isAnime, lastPlay, animeEpisodes, cinemetaFull?.videos, playMeta]);
+    prefetchSegments(playMeta, targetEp, skipPrefetchOn);
+  }, [
+    loading,
+    isSeries,
+    isAnime,
+    lastPlay,
+    animeEpisodes,
+    cinemetaFull?.videos,
+    playMeta,
+    skipPrefetchOn,
+  ]);
 
   const smartPlay = useCallback(
     async (forcePicker = false) => {
