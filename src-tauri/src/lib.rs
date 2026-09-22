@@ -16,6 +16,7 @@ mod fullscreen;
 mod hdr_overlay;
 mod http_fetch;
 mod local_lib;
+mod mdns_browse;
 mod modal_overlay;
 mod mpv;
 mod multiview;

@@ -1,7 +1,8 @@
 import { activeProfileId } from "@/lib/active-profile-id";
 import { kitsuToAnilist } from "@/lib/providers/anime-mapping";
 import { AnilistApiError, anilistRequest } from "./client";
-import { isAuthenticated } from "./session";
+import { createProgressSyncDeps, runAnimeProgressSync } from "./progress-sync";
+import { getSession, isAuthenticated } from "./session";
 
 export type SyncEvent =
   | { kind: "syncing"; title: string; episode: number }
@@ -26,28 +27,6 @@ export function getLastSync(): SyncEvent | null {
 function emit(e: SyncEvent): void {
   last = e;
   for (const fn of listeners) fn(e);
-}
-
-const SENT_KEY_BASE = "harbor.anilist.synced.v1";
-function sentKey(): string {
-  return `${SENT_KEY_BASE}.${activeProfileId()}`;
-}
-type SentMap = Record<string, number>;
-
-function loadSent(): SentMap {
-  try {
-    return JSON.parse(localStorage.getItem(sentKey()) ?? "{}") as SentMap;
-  } catch {
-    return {};
-  }
-}
-
-function saveSent(map: SentMap): void {
-  try {
-    localStorage.setItem(sentKey(), JSON.stringify(map));
-  } catch {
-    return;
-  }
 }
 
 function leadingInt(value: string): number | null {
@@ -79,19 +58,11 @@ export async function resolveAnilistMediaId(harborId: string): Promise<number | 
   return null;
 }
 
-const ENTRY_QUERY = `query ($id: Int) {
+const WATCHING_ENTRY_QUERY = `query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id
     episodes
-    mediaListEntry { id progress status }
-  }
-}`;
-
-const SAVE_MUTATION = `mutation ($mediaId: Int, $progress: Int, $status: MediaListStatus) {
-  SaveMediaListEntry(mediaId: $mediaId, progress: $progress, status: $status) {
-    id
-    progress
-    status
+    mediaListEntry { id progress status repeat }
   }
 }`;
 
@@ -106,39 +77,55 @@ type EntryResponse = {
   Media: {
     id: number;
     episodes: number | null;
-    mediaListEntry: { id: number; progress: number; status: string } | null;
+    mediaListEntry: { id: number; progress: number; status: string; repeat: number } | null;
   } | null;
 };
 
-type SaveResponse = {
-  SaveMediaListEntry: { id: number; progress: number; status: string } | null;
-};
-
-const inflight = new Set<string>();
 const watchingMarked = new Set<string>();
+const progressQueue = new Map<number, Promise<void>>();
+
+/** Serialize progress writes per media so a slower response cannot overwrite a newer one. */
+function enqueueProgressSync(mediaId: number, run: () => Promise<void>): Promise<void> {
+  const previous = progressQueue.get(mediaId) ?? Promise.resolve();
+  const next = previous.then(run, run);
+  progressQueue.set(mediaId, next);
+  void next.finally(() => {
+    if (progressQueue.get(mediaId) === next) progressQueue.delete(mediaId);
+  });
+  return next;
+}
 
 export function resetForProfile(): void {
-  inflight.clear();
+  progressQueue.clear();
   watchingMarked.clear();
 }
 
 export async function markAnimeWatching(harborId: string, title: string): Promise<void> {
   if (!isAuthenticated()) return;
+  const profileId = activeProfileId();
+  const token = getSession()?.accessToken ?? null;
+  if (!token) return;
   if (watchingMarked.has(harborId)) return;
   watchingMarked.add(harborId);
   try {
     const mediaId = await resolveAnilistMediaId(harborId);
-    if (mediaId == null) {
+    if (mediaId == null || activeProfileId() !== profileId) {
       watchingMarked.delete(harborId);
       return;
     }
-    const cur = await anilistRequest<EntryResponse>(ENTRY_QUERY, { id: mediaId });
+    // The captured token is the third argument. Never pass a fourth: the client's
+    // `skipAuth` flag nulls the token when true, which would send the write
+    // anonymously.
+    const cur = await anilistRequest<EntryResponse>(WATCHING_ENTRY_QUERY, { id: mediaId }, token);
     const entry = cur?.Media?.mediaListEntry;
     if (entry && entry.status !== "PLANNING") return;
-    await anilistRequest<{ SaveMediaListEntry: { id: number } | null }>(SAVE_STATUS_MUTATION, {
-      mediaId,
-      status: "CURRENT",
-    });
+    // The account can switch within the same profile after the entry is read.
+    if (activeProfileId() !== profileId || getSession()?.accessToken !== token) return;
+    await anilistRequest<{ SaveMediaListEntry: { id: number } | null }>(
+      SAVE_STATUS_MUTATION,
+      { mediaId, status: "CURRENT" },
+      token,
+    );
     emit({ kind: "watching", title });
   } catch (e) {
     watchingMarked.delete(harborId);
@@ -155,49 +142,39 @@ export async function syncAnimeProgress(
   const ep = episode ?? 1;
   if (!Number.isFinite(ep) || ep < 1) return;
 
-  const sent = loadSent();
-  if ((sent[harborId] ?? 0) >= ep) return;
+  // Bind the account before queueing: a profile switch while this episode waits
+  // must not push it to whoever signs in next.
+  const profileId = activeProfileId();
+  const token = getSession()?.accessToken ?? null;
+  if (!token) return;
 
-  const flightKey = `${harborId}|${ep}`;
-  if (inflight.has(flightKey)) return;
-  inflight.add(flightKey);
+  const mediaId = await resolveAnilistMediaId(harborId).catch(() => null);
+  if (mediaId == null) return;
+  if (activeProfileId() !== profileId) return;
 
-  try {
-    const mediaId = await resolveAnilistMediaId(harborId);
-    if (mediaId == null) return;
-
-    const cur = await anilistRequest<EntryResponse>(ENTRY_QUERY, { id: mediaId });
-    const media = cur?.Media;
-    if (!media) return;
-
-    const current = media.mediaListEntry?.progress ?? 0;
-    if (ep <= current) {
-      sent[harborId] = current;
-      saveSent(sent);
-      return;
-    }
-
-    const total = media.episodes ?? 0;
-    const status = total > 0 && ep >= total ? "COMPLETED" : "CURRENT";
-    emit({ kind: "syncing", title, episode: ep });
-
-    const saved = await anilistRequest<SaveResponse>(SAVE_MUTATION, {
+  await enqueueProgressSync(mediaId, async () => {
+    if (activeProfileId() !== profileId) return;
+    const live = getSession();
+    if (!live || live.accessToken !== token) return;
+    await runAnimeProgressSync(
       mediaId,
-      progress: ep,
-      status,
-    });
-
-    if (saved?.SaveMediaListEntry?.progress === ep) {
-      sent[harborId] = ep;
-      saveSent(sent);
-      emit({ kind: "ok", title, episode: ep });
-    } else {
-      emit({ kind: "error", title, message: "AniList did not confirm the update." });
-    }
-  } catch (e) {
-    if (e instanceof AnilistApiError && e.status === 401) return;
-    emit({ kind: "error", title, message: "Couldn't reach AniList." });
-  } finally {
-    inflight.delete(flightKey);
-  }
+      ep,
+      createProgressSyncDeps({
+        token,
+        // Three arguments only: a fourth `true` is the client's `skipAuth` flag
+        // and would clear the token, sending the write anonymously.
+        request: (query, variables, requestToken) => anilistRequest(query, variables, requestToken),
+        // Re-checked after the entry is read, so a profile or account switch
+        // during that read cannot push the write to the wrong account.
+        isStillValid: () =>
+          isAuthenticated() &&
+          activeProfileId() === profileId &&
+          getSession()?.accessToken === token,
+        emit: (event) => {
+          if (event.kind === "error") emit({ kind: "error", title, message: event.message });
+          else emit({ kind: event.kind, title, episode: event.episode });
+        },
+      }),
+    );
+  });
 }

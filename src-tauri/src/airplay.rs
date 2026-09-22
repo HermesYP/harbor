@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 
-use mdns_sd::{ServiceDaemon, ServiceEvent};
+use mdns_sd::ServiceInfo;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 
-const AIRPLAY_SERVICE_TYPE: &str = "_airplay._tcp.local.";
+use crate::mdns_browse;
+
+pub const AIRPLAY_SERVICE_TYPE: &str = "_airplay._tcp.local.";
 
 #[derive(Debug, Clone)]
 pub struct AirPlayDevice {
@@ -56,9 +58,64 @@ pub async fn supports_legacy_airplay(host: &str, port: u16) -> bool {
 }
 
 pub async fn discover(timeout_ms: u64) -> Vec<AirPlayDevice> {
-    let raw = discover_mdns(timeout_ms).await;
+    let result = tokio::task::spawn_blocking(move || {
+        mdns_browse::browse_all(&[AIRPLAY_SERVICE_TYPE], Duration::from_millis(timeout_ms))
+    })
+    .await
+    .unwrap_or_default();
+    let devices = devices_from_services(
+        result
+            .services
+            .get(AIRPLAY_SERVICE_TYPE)
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+    );
+    filter_legacy(devices).await
+}
+
+/// Maps resolved `_airplay._tcp.local.` records to candidate devices.
+///
+/// Kept separate from the browse so callers that share one mDNS daemon across
+/// service types can reuse it, and so the mapping can be tested without a daemon.
+pub fn devices_from_services(infos: &[ServiceInfo]) -> Vec<AirPlayDevice> {
+    let mut devices: HashMap<String, AirPlayDevice> = HashMap::new();
+    for info in infos {
+        let addrs = info.get_addresses();
+        let Some(addr) = pick_address(addrs) else {
+            continue;
+        };
+        let port = info.get_port();
+        let host = addr.to_string();
+        let props: HashMap<String, String> = info
+            .get_properties()
+            .iter()
+            .map(|p| (p.key().to_lowercase(), p.val_str().to_string()))
+            .collect();
+        let name = info
+            .get_fullname()
+            .trim_end_matches(AIRPLAY_SERVICE_TYPE)
+            .trim_end_matches('.')
+            .to_string();
+        let model = props.get("model").or_else(|| props.get("am")).cloned();
+        let id = format!("airplay-{}-{}", host, port);
+        devices.insert(
+            id.clone(),
+            AirPlayDevice {
+                id,
+                name,
+                host,
+                port,
+                model,
+            },
+        );
+    }
+    devices.into_values().collect()
+}
+
+/// Drops candidates that only work with AirPlay 2 pairing.
+pub async fn filter_legacy(devices: Vec<AirPlayDevice>) -> Vec<AirPlayDevice> {
     let mut out = Vec::new();
-    for d in raw {
+    for d in devices {
         if supports_legacy_airplay(&d.host, d.port).await {
             out.push(d);
         } else {
@@ -69,58 +126,6 @@ pub async fn discover(timeout_ms: u64) -> Vec<AirPlayDevice> {
         }
     }
     out
-}
-
-async fn discover_mdns(timeout_ms: u64) -> Vec<AirPlayDevice> {
-    tokio::task::spawn_blocking(move || -> Vec<AirPlayDevice> {
-        let Ok(daemon) = ServiceDaemon::new() else { return Vec::new() };
-        let Ok(receiver) = daemon.browse(AIRPLAY_SERVICE_TYPE) else {
-            return Vec::new();
-        };
-        let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
-        let mut devices: HashMap<String, AirPlayDevice> = HashMap::new();
-        while std::time::Instant::now() < deadline {
-            match receiver.recv_timeout(Duration::from_millis(120)) {
-                Ok(ServiceEvent::ServiceResolved(info)) => {
-                    let addrs = info.get_addresses();
-                    let Some(addr) = pick_address(addrs) else { continue };
-                    let port = info.get_port();
-                    let host = addr.to_string();
-                    let props: HashMap<String, String> = info
-                        .get_properties()
-                        .iter()
-                        .map(|p| (p.key().to_lowercase(), p.val_str().to_string()))
-                        .collect();
-                    let name = info
-                        .get_fullname()
-                        .trim_end_matches(AIRPLAY_SERVICE_TYPE)
-                        .trim_end_matches('.')
-                        .to_string();
-                    let model = props
-                        .get("model")
-                        .or_else(|| props.get("am"))
-                        .cloned();
-                    let id = format!("airplay-{}-{}", host, port);
-                    devices.insert(
-                        id.clone(),
-                        AirPlayDevice {
-                            id,
-                            name,
-                            host,
-                            port,
-                            model,
-                        },
-                    );
-                }
-                Ok(_) => {}
-                Err(_) => {}
-            }
-        }
-        let _ = daemon.shutdown();
-        devices.into_values().collect()
-    })
-    .await
-    .unwrap_or_default()
 }
 
 fn airplay_endpoint(host: &str, port: u16, path: &str) -> String {

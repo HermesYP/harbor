@@ -30,8 +30,23 @@ import {
 import { fetchAddonMeta } from "@/lib/addons";
 import { resolveMeta } from "@/lib/meta-resource";
 import { useMdblistScores } from "@/lib/providers/mdblist";
-import { lastPlayedEpisode, readResumeEntry, saveResumeMs } from "@/lib/resume";
-import { localCwEntry } from "@/lib/local-cw";
+import {
+  lastPlayedEpisode,
+  readResumeEntry,
+  resumeVersion,
+  saveResumeMs,
+  subscribeResume,
+} from "@/lib/resume";
+import { localCwEntry, localCwVersion, subscribeLocalCw } from "@/lib/local-cw";
+import { getEpisodeProgress } from "@/lib/episode-progress";
+import { nextUnwatchedAfter } from "@/lib/series-episodes";
+import {
+  isResumeEntry,
+  mergeResumeCandidates,
+  resolveDetailResume,
+  type ResumeCandidate,
+  type ResumeEpisode,
+} from "@/lib/detail-resume";
 import { omdbPrefetch, omdbScores, type OmdbScores } from "@/lib/providers/omdb";
 import { harborImdbTitle } from "@/lib/providers/harbor-imdb";
 import { awardSummary, useAwards } from "@/lib/providers/wikidata";
@@ -897,6 +912,10 @@ export function DetailView({
     manualWatchedVersion,
     manualWatchedVersion,
   );
+  // The resume target depends on local resume/Continue Watching state that the
+  // player writes while this view stays mounted, so it has to subscribe to it.
+  const localCwVer = useSyncExternalStore(subscribeLocalCw, localCwVersion);
+  const resumeVer = useSyncExternalStore(subscribeResume, resumeVersion);
   const prevSeriesWatchedVerRef = useRef(-1);
   const stremioVideosRef = useRef<{ imdb: string; videos: NonNullable<Meta["videos"]> } | null>(
     null,
@@ -954,9 +973,11 @@ export function DetailView({
   const currentFranchiseId = animeCanonicalId ?? meta.id;
 
   const lastPlay = useMemo(() => {
+    // These revisions invalidate reads from the external stores below.
+    void seriesWatchedVer;
+    void localCwVer;
+    void resumeVer;
     if (episodeHint) return episodeHint;
-    if (isAnime) return lastPlayedEpisode(meta.id);
-    const candidates: Array<{ season: number; episode: number; t: number }> = [];
     const ids = Array.from(
       new Set(
         [
@@ -966,41 +987,86 @@ export function DetailView({
         ].filter((x): x is string => !!x),
       ),
     );
-    for (const id of ids) {
-      const lc = localCwEntry(id);
-      if (
-        lc?.type === "series" &&
-        typeof lc.season === "number" &&
-        typeof lc.episode === "number" &&
-        lc.season >= 1 &&
-        lc.episode >= 1
-      ) {
-        candidates.push({ season: lc.season, episode: lc.episode, t: lc.t });
+    const candidates: ResumeCandidate[] = [];
+    if (isAnime) {
+      const last = lastPlayedEpisode(meta.id);
+      if (isResumeEntry(last)) {
+        candidates.push({ season: last.season, episode: last.episode, t: last.t });
       }
-      const lp = lastPlayedEpisode(id);
-      if (lp && lp.season >= 1 && lp.episode >= 1) {
-        candidates.push({ season: lp.season, episode: lp.episode, t: lp.t });
+    } else {
+      for (const id of ids) {
+        const lc = localCwEntry(id);
+        if (lc?.type === "series" && isResumeEntry(lc)) {
+          candidates.push({ season: lc.season, episode: lc.episode, t: lc.t });
+        }
+        const lp = lastPlayedEpisode(id);
+        if (isResumeEntry(lp)) {
+          candidates.push({ season: lp.season, episode: lp.episode, t: lp.t });
+        }
       }
     }
     const st = libraryItem?.state;
-    if (libraryItem?.type === "series" && st && (st.timeOffset ?? 0) > 0) {
+    if (!isAnime && libraryItem?.type === "series" && st && (st.timeOffset ?? 0) > 0) {
       const se = episodeFromVideoId(st.video_id);
       const season = st.season ?? se?.season;
       const episode = st.episode ?? se?.episode;
       if (
         typeof season === "number" &&
         typeof episode === "number" &&
-        season >= 1 &&
-        episode >= 1
+        isResumeEntry({ season, episode })
       ) {
         const mt = Date.parse(libraryItem._mtime ?? st.lastWatched ?? "");
         candidates.push({ season, episode, t: Number.isFinite(mt) ? mt : 0 });
       }
     }
-    if (candidates.length === 0) return null;
-    candidates.sort((a, b) => b.t - a.t);
-    return { season: candidates[0].season, episode: candidates[0].episode };
-  }, [meta.id, detail?.imdbId, detail?.id, libraryItem, isAnime, episodeHint]);
+    const merged = mergeResumeCandidates(candidates);
+    if (merged.length === 0) return null;
+
+    const episodes: ResumeEpisode[] = isAnime
+      ? animeEpisodes
+          .filter((e) => Number.isFinite(e.number) && e.number >= 1)
+          .map((e) => ({
+            season: e.seasonNumber || 1,
+            episode: e.number,
+            airDate: e.airdate ?? undefined,
+            runtime: e.length,
+          }))
+      : (cinemetaFull?.videos ?? [])
+          .filter(
+            (v) =>
+              typeof v.season === "number" &&
+              typeof v.episode === "number" &&
+              v.season >= 1 &&
+              v.episode >= 1,
+          )
+          .map((v) => ({ season: v.season!, episode: v.episode!, airDate: v.released }));
+
+    const resolved = resolveDetailResume(
+      merged,
+      episodes,
+      isAnime ? [meta.id] : ids,
+      stremioWatched,
+      nextUnwatchedAfter,
+      getEpisodeProgress,
+    );
+    // Finished show, finale, or nothing aired yet: keep resuming the last
+    // played episode rather than jumping back to the pilot.
+    const target = resolved ?? { season: merged[0].season, episode: merged[0].episode };
+    return { season: target.season, episode: target.episode };
+  }, [
+    meta.id,
+    detail?.imdbId,
+    detail?.id,
+    libraryItem,
+    isAnime,
+    episodeHint,
+    animeEpisodes,
+    cinemetaFull?.videos,
+    stremioWatched,
+    seriesWatchedVer,
+    localCwVer,
+    resumeVer,
+  ]);
 
   useEffect(() => {
     if (loading) return;
