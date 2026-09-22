@@ -1,6 +1,7 @@
 import { parseM3u } from "../m3u";
-import { fetchM3uText, shapePlaylist } from "../store";
+import { fetchM3uText, PARSE_LIMIT_BYTES, shapePlaylist } from "../store";
 import { liveContainerPref } from "../settings-bridge";
+import { readLocalTextFile } from "../local-file";
 import type { IptvPlaylist, IptvPlaylistSource } from "../types";
 import {
   fetchXtreamLiveChannels,
@@ -20,7 +21,7 @@ export async function loadFromShape(
   if (shape.kind === "invalid") throw new Error(shape.reason);
   if (shape.kind === "epg") return shapePlaylist({ ...src, url: shape.url }, []);
   if (shape.kind === "xtream") return loadXtream(src, shape.creds);
-  return loadM3u(src, shape.url, shape.middleware);
+  return loadM3u(src, shape.url, shape.middleware, shape.local ?? false);
 }
 
 async function loadXtream(src: IptvPlaylistSource, creds: XtreamCreds): Promise<IptvPlaylist> {
@@ -39,14 +40,22 @@ async function loadM3u(
   src: IptvPlaylistSource,
   url: string,
   middleware: boolean,
+  local: boolean,
 ): Promise<IptvPlaylist> {
-  const text = await fetchM3uText(url);
+  // Local sources are read with the same byte budget as remote fetches, and
+  // never probe middleware paths (there is no server origin to probe).
+  const text = local ? await readLocalTextFile(url, PARSE_LIMIT_BYTES) : await fetchM3uText(url);
   if (isM3u(text)) return parseAndShape(src, text);
   if (middleware) {
     const recovered = await probeMiddleware(url);
     if (recovered) return parseAndShape({ ...src, url: recovered.url }, recovered.text);
   }
   const preview = text.slice(0, 120).replace(/\s+/g, " ");
+  if (local) {
+    throw new Error(
+      `Local playlist file is not an M3U playlist (missing #EXTM3U). Got: ${preview}`,
+    );
+  }
   throw new Error(`Server response was not an M3U playlist. Got: ${preview || "(empty)"}`);
 }
 
