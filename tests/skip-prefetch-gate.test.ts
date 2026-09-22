@@ -1,7 +1,7 @@
 // @ts-expect-error Node test types are intentionally outside the browser-only tsconfig.
 import assert from "node:assert/strict";
 // @ts-expect-error Node test types are intentionally outside the browser-only tsconfig.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 // @ts-expect-error Node test types are intentionally outside the browser-only tsconfig.
 import test from "node:test";
 import { prefetchSkipSegments, skipPrefetchEnabled } from "../src/lib/skip-intro/prefetch.ts";
@@ -112,4 +112,45 @@ test("auto-skip toggles alone keep the warm-up alive", () => {
     });
     assert.deepEqual(calls, ["aniskip", "introDb"], flag);
   }
+});
+
+// Source-contract guard: the helper tests above cannot see an ungated
+// prefetchSegments call, and one at any view call site would re-trigger the
+// default-user popup. Assert every call site derives skipPrefetchOn from
+// skipPrefetchEnabled(settings) and passes it as the gate argument, and that
+// no other file under src/ calls prefetchSegments at all.
+const PREFETCH_CALL_SITES = [
+  "views/detail.tsx",
+  "views/detail/episode-grid-card.tsx",
+  "views/detail/series-episode-row.tsx",
+  "views/play-picker.tsx",
+];
+
+const GATE_DERIVATION = /const\s+skipPrefetchOn\s*=\s*skipPrefetchEnabled\(settings\)/;
+// Call sites never nest parens inside prefetchSegments arguments today; the
+// lookbehind excludes the function definition in skip-intro/index.ts.
+const PREFETCH_CALL = /(?<!function )prefetchSegments\(/g;
+const GATED_CALL = /(?<!function )prefetchSegments\((?:[^;()])*?skipPrefetchOn\s*\)/g;
+
+function readSrcFile(rel: string): string {
+  return readFileSync(new URL(`../src/${rel}`, import.meta.url), "utf8");
+}
+
+test("every prefetch call site derives its gate from skipPrefetchEnabled", () => {
+  for (const rel of PREFETCH_CALL_SITES) {
+    const source = readSrcFile(rel);
+    assert.match(source, GATE_DERIVATION, rel);
+    const calls = source.match(PREFETCH_CALL) ?? [];
+    assert.ok(calls.length > 0, `${rel} has no prefetchSegments call`);
+    assert.equal((source.match(GATED_CALL) ?? []).length, calls.length, rel);
+  }
+});
+
+test("no file outside the four call sites invokes prefetchSegments", () => {
+  const root = new URL("../src/", import.meta.url);
+  const callers = readdirSync(root, { recursive: true })
+    .map((entry) => String(entry).replace(/\\/g, "/"))
+    .filter((rel) => rel.endsWith(".ts") || rel.endsWith(".tsx"))
+    .filter((rel) => readFileSync(new URL(rel, root), "utf8").match(PREFETCH_CALL));
+  assert.deepEqual([...callers].sort(), [...PREFETCH_CALL_SITES].sort());
 });
