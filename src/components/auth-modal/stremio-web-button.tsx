@@ -4,7 +4,17 @@ import { useAuth } from "@/lib/auth";
 import { useT } from "@/lib/i18n";
 import { canStremioWebAuth, startStremioWebAuth } from "@/lib/stremio-auth";
 
-export function StremioWebButton({ onDone, disabled }: { onDone: () => void; disabled?: boolean }) {
+export function StremioWebButton({
+  onDone,
+  disabled,
+  beginPending,
+  endPending,
+}: {
+  onDone: () => void;
+  disabled?: boolean;
+  beginPending?: () => boolean;
+  endPending?: () => void;
+}) {
   const { signInWithKey } = useAuth();
   const t = useT();
   const [busy, setBusy] = useState(false);
@@ -13,6 +23,8 @@ export function StremioWebButton({ onDone, disabled }: { onDone: () => void; dis
   if (!canStremioWebAuth()) return null;
 
   const start = async () => {
+    if (busy || disabled) return;
+    if (beginPending && !beginPending()) return;
     setBusy(true);
     setError(null);
     try {
@@ -22,6 +34,7 @@ export function StremioWebButton({ onDone, disabled }: { onDone: () => void; dis
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sign-in failed.");
       setBusy(false);
+      endPending?.();
     }
   };
 
@@ -48,7 +61,9 @@ export function StremioWebButton({ onDone, disabled }: { onDone: () => void; dis
       <p className="text-center text-[11.5px] leading-snug text-ink-subtle">
         {t("Opens Stremio in your browser. Works with email, Facebook, and Apple accounts.")}
       </p>
-      {error && <p className="rounded-lg bg-danger/15 px-3 py-2 text-[12px] text-danger">{error}</p>}
+      {error && (
+        <p className="rounded-lg bg-danger/15 px-3 py-2 text-[12px] text-danger">{error}</p>
+      )}
     </div>
   );
 }

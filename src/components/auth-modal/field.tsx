@@ -45,9 +45,12 @@ export function Field({
           onKeyDown={
             onEnter
               ? (e) => {
-                  if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-                  // Stop Enter from implicitly submitting the surrounding e-mail form.
+                  if (e.key !== "Enter") return;
+                  // Stop Enter from implicitly submitting the surrounding
+                  // e-mail form in every case — including Enter pressed while
+                  // an IME composition is still open.
                   e.preventDefault();
+                  if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
                   onEnter();
                 }
               : undefined

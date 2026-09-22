@@ -1,8 +1,9 @@
 import { Check, ExternalLink, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/lib/auth";
 import { useT } from "@/lib/i18n";
+import { createSignInGate, type SignInMethod } from "@/lib/sign-in-gate";
 import { openUrl } from "@/lib/window";
 import { AuthKeyForm } from "./auth-modal/auth-key-form";
 import { Field } from "./auth-modal/field";
@@ -15,7 +16,24 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // One pending slot shared by the e-mail, browser, and key methods so two
+  // sign-ins can never run concurrently; the gate is the synchronous truth,
+  // `pending` re-renders and disables every method while any is in flight.
+  const gate = useRef(createSignInGate());
+  const [pending, setPending] = useState<SignInMethod | null>(null);
+  const busy = pending !== null;
+
+  const tryBegin = useCallback((method: SignInMethod): boolean => {
+    if (!gate.current.tryBegin(method)) return false;
+    setPending(method);
+    return true;
+  }, []);
+  const endPending = useCallback(() => {
+    gate.current.end();
+    setPending(null);
+  }, []);
+  const beginBrowser = useCallback(() => tryBegin("browser"), [tryBegin]);
+  const beginKey = useCallback(() => tryBegin("key"), [tryBegin]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -25,14 +43,14 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true);
+    if (!tryBegin("email")) return;
     setError(null);
     try {
       await signIn(email, password, remember);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
-      setBusy(false);
+      endPending();
     }
   };
 
@@ -55,7 +73,12 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
           </p>
         </div>
 
-        <StremioWebButton onDone={onClose} disabled={busy} />
+        <StremioWebButton
+          onDone={onClose}
+          disabled={busy}
+          beginPending={beginBrowser}
+          endPending={endPending}
+        />
 
         <div className="flex items-center gap-3">
           <span className="h-px flex-1 bg-edge-soft" />
@@ -112,7 +135,7 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
           disabled={busy || !email || !password}
           className="flex h-11 items-center justify-center gap-2 rounded-xl border border-edge bg-elevated text-[14px] font-semibold text-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? (
+          {pending === "email" ? (
             <>
               <Loader2 size={15} className="animate-spin" />
               {t("Signing in...")}
@@ -130,7 +153,12 @@ export function AuthModal({ onClose }: { onClose: () => void }) {
           <span className="h-px flex-1 bg-edge-soft" />
         </div>
 
-        <AuthKeyForm onDone={onClose} disabled={busy} />
+        <AuthKeyForm
+          onDone={onClose}
+          pending={pending}
+          beginPending={beginKey}
+          endPending={endPending}
+        />
 
         <div className="flex items-center justify-between gap-3 pt-1">
           <button

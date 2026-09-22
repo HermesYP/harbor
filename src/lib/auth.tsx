@@ -4,10 +4,16 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { performAuthKeyLogin } from "./auth-key-login";
+import {
+  AuthKeyLoginError,
+  performAuthKeyLogin,
+  performVerifiedAuthKeyLogin,
+  type AuthKeyRequest,
+} from "./auth-key-login";
 import { stremioSourceProfileId, useProfiles, type Profile } from "./profiles";
 import { getUser, login as apiLogin, type User } from "./stremio";
 
@@ -16,7 +22,10 @@ type AuthValue = {
   user: User | null;
   authKey: string | null;
   signIn: (email: string, password: string, remember?: boolean) => Promise<void>;
+  /** Pre-existing browser-OAuth-return path; keeps the synthetic-user fallback. */
   signInWithKey: (authKey: string) => Promise<void>;
+  /** Strict path for manually pasted keys; commits only after real validation. */
+  manualSignInWithKey: (authKey: string, request?: AuthKeyRequest) => Promise<void>;
   signOut: () => void;
 };
 
@@ -83,6 +92,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     liveStremioAuthKey = session?.authKey ?? null;
   }, [session]);
 
+  const activeProfileIdRef = useRef<string | null>(activeProfile?.id ?? null);
+  useEffect(() => {
+    activeProfileIdRef.current = activeProfile?.id ?? null;
+  }, [activeProfile]);
+
   const commitSession = useCallback(
     (fresh: Session) => {
       if (!activeProfile) {
@@ -114,6 +128,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [commitSession],
   );
 
+  const manualSignInWithKey = useCallback(
+    (authKey: string, request?: AuthKeyRequest) => {
+      const expectedProfileId = activeProfileIdRef.current;
+      return performVerifiedAuthKeyLogin(authKey, {
+        fetchUser: (key) => getUser(key),
+        commit: (fresh) => {
+          // The account selection changed while the key was being verified:
+          // never write the session to a profile other than the one that
+          // started this sign-in.
+          if (activeProfileIdRef.current !== expectedProfileId) {
+            throw new AuthKeyLoginError("cancelled");
+          }
+          commitSession(fresh);
+        },
+        request,
+      });
+    },
+    [commitSession],
+  );
+
   const signOut = useCallback(() => {
     if (!activeProfile) {
       setSession(null);
@@ -133,9 +167,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authKey: session?.authKey ?? null,
       signIn,
       signInWithKey,
+      manualSignInWithKey,
       signOut,
     }),
-    [session, signIn, signInWithKey, signOut],
+    [session, signIn, signInWithKey, manualSignInWithKey, signOut],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
