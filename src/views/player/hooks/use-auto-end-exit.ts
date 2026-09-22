@@ -46,6 +46,7 @@ export function useAutoEndExit(params: {
   }, [src.url]);
 
   useEffect(() => {
+    const scheduler = schedulerRef.current;
     if (snap.durationSec <= 0) return;
     const pos = getPlaybackPosition();
     const naturalEnd = snap.status === "ended";
@@ -77,11 +78,11 @@ export function useAutoEndExit(params: {
     // (e.g. a natural EOF whose title-detail request settles empty after a
     // transient loading hold), while a close that already fired never
     // schedules again for this source.
-    const armed = schedulerRef.current.schedule(src.url, () => {
+    const armed = scheduler.schedule(src.url, () => {
       void closePlayer();
     });
     if (!armed) return;
-    return () => schedulerRef.current.cancel();
+    return () => scheduler.cancel();
   }, [
     snap.status,
     snap.errorCode,
@@ -95,5 +96,6 @@ export function useAutoEndExit(params: {
     reloadLive,
     src.url,
     closePlayer,
+    startedNearEndRef,
   ]);
 }
