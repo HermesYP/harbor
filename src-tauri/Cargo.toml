@@ -61,7 +61,7 @@ harbor-core = { path = "../harbor-core" }
 librqbit = { version = "=8.1.1", default-features = false, features = ["rust-tls"] }
 url = "2"
 realfft = "3"
-hickory-resolver = "0.25"
+hickory-resolver = "0.26"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
